@@ -1,0 +1,41 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pageindex"
+version = "0.1.0"
+description = "Vectorless, reasoning-based RAG over long documents"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "litellm==1.83.0",
+  "opendataloader-pdf",
+  "pymupdf==1.26.4",
+  "PyPDF2==3.0.1",
+  "python-dotenv==1.1.0",
+  "pyyaml==6.0.2",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0",
+  "ruff>=0.6.0",
+]
+
+[project.scripts]
+pageindex = "pageindex.cli:main"
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.package-data]
+pageindex = ["config.yaml"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-p no:cacheprovider"
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"

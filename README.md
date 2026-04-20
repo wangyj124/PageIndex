@@ -82,19 +82,19 @@ The PageIndex service is available as a ChatGPT-style [chat platform](https://ch
 ### 🧪 Quick Hands-on
 
 - 🔥 [**Agentic Vectorless RAG**](examples/agentic_vectorless_rag_demo.py) (**latest**) — a simple but complete **agentic vectorless RAG** [example](https://github.com/VectifyAI/PageIndex/blob/main/examples/agentic_vectorless_rag_demo.py) with *self-hosted* PageIndex, using OpenAI Agents SDK.
-- Try the [Vectorless RAG](https://github.com/VectifyAI/PageIndex/blob/main/cookbook/pageindex_RAG_simple.ipynb) notebook — a *minimal*, hands-on example of reasoning-based RAG using PageIndex.
-- Check out [Vision-based Vectorless RAG](https://github.com/VectifyAI/PageIndex/blob/main/cookbook/vision_RAG_pageindex.ipynb) — no OCR; a minimal, vision-based & reasoning-native RAG pipeline that works directly over page images.
+- Try the [Vectorless RAG](https://github.com/VectifyAI/PageIndex/blob/main/notebooks/pageindex_RAG_simple.ipynb) notebook — a *minimal*, hands-on example of reasoning-based RAG using PageIndex.
+- Check out [Vision-based Vectorless RAG](https://github.com/VectifyAI/PageIndex/blob/main/notebooks/vision_RAG_pageindex.ipynb) — no OCR; a minimal, vision-based & reasoning-native RAG pipeline that works directly over page images.
   
 <div align="center">
   <a href="https://github.com/VectifyAI/PageIndex/blob/main/examples/agentic_vectorless_rag_demo.py" target="_blank" rel="noopener">
     <img src="https://img.shields.io/badge/View_on_GitHub-Agentic_Vectorless_RAG-blue?style=for-the-badge&logo=github" alt="View on GitHub: Agentic Vectorless RAG" />
   </a>
   <br/>
-  <a href="https://colab.research.google.com/github/VectifyAI/PageIndex/blob/main/cookbook/pageindex_RAG_simple.ipynb" target="_blank" rel="noopener">
+  <a href="https://colab.research.google.com/github/VectifyAI/PageIndex/blob/main/notebooks/pageindex_RAG_simple.ipynb" target="_blank" rel="noopener">
     <img src="https://img.shields.io/badge/Open_In_Colab-Vectorless_RAG-orange?style=for-the-badge&logo=googlecolab" alt="Open in Colab: Vectorless RAG" />
   </a>
   &nbsp;&nbsp;
-  <a href="https://colab.research.google.com/github/VectifyAI/PageIndex/blob/main/cookbook/vision_RAG_pageindex.ipynb" target="_blank" rel="noopener">
+  <a href="https://colab.research.google.com/github/VectifyAI/PageIndex/blob/main/notebooks/vision_RAG_pageindex.ipynb" target="_blank" rel="noopener">
     <img src="https://img.shields.io/badge/Open_In_Colab-Vision_RAG-orange?style=for-the-badge&logo=googlecolab" alt="Open in Colab: Vision RAG" />
   </a>
 </div>
@@ -105,7 +105,7 @@ The PageIndex service is available as a ChatGPT-style [chat platform](https://ch
 
 PageIndex can transform lengthy PDF documents into a semantic **tree structure**, similar to a _"table of contents"_ but optimized for use with Large Language Models (LLMs). It's ideal for: financial reports, regulatory filings, academic textbooks, legal or technical manuals, and any document that exceeds LLM context limits.
 
-Below is an example PageIndex tree structure. Also see more example [documents](https://github.com/VectifyAI/PageIndex/tree/main/examples/documents) and generated [tree structures](https://github.com/VectifyAI/PageIndex/tree/main/examples/documents/results).
+Below is an example PageIndex tree structure. Also see more example [documents](https://github.com/VectifyAI/PageIndex/tree/main/sample_data/documents) and generated [tree structures](https://github.com/VectifyAI/PageIndex/tree/main/sample_data/results).
 
 ```jsonc
 ...
@@ -146,8 +146,11 @@ You can follow these steps to generate a PageIndex tree from a PDF document.
 ### 1. Install dependencies
 
 ```bash
+conda activate PageIndex
 pip3 install --upgrade -r requirements.txt
 ```
+
+All commands below assume you have already activated the `PageIndex` conda environment.
 
 ### 2. Set your LLM API key
 
@@ -158,6 +161,13 @@ OPENAI_API_KEY=your_openai_key_here
 ```
 
 ### 3. Generate PageIndex structure for your PDF
+
+```bash
+conda activate PageIndex
+python3 -m pageindex.cli --pdf_path /path/to/your/document.pdf
+```
+
+Compatibility entrypoint:
 
 ```bash
 python3 run_pageindex.py --pdf_path /path/to/your/document.pdf
@@ -185,7 +195,8 @@ You can customize the processing with additional optional arguments:
 We also provide markdown support for PageIndex. You can use the `--md_path` flag to generate a tree structure for a markdown file.
 
 ```bash
-python3 run_pageindex.py --md_path /path/to/your/document.md
+conda activate PageIndex
+python3 -m pageindex.cli --md_path /path/to/your/document.md
 ```
 
 > Note: in this mode, we use "#" to determine node headings and their levels. For example, "##" is level 2, "###" is level 3, etc. Make sure your markdown file is formatted correctly. If your Markdown file was converted from a PDF or HTML, we don't recommend using this mode, since most existing conversion tools cannot preserve the original hierarchy. Instead, use our [PageIndex OCR](https://pageindex.ai/blog/ocr), which is designed to preserve the original hierarchy, to convert the PDF to a markdown file and then use this mode.
@@ -197,11 +208,44 @@ For a simple, end-to-end _**agentic vectorless RAG**_ example using PageIndex wi
 
 ```bash
 # Install optional dependency
+conda activate PageIndex
 pip3 install openai-agents
 
 # Run the demo
 python3 examples/agentic_vectorless_rag_demo.py
 ```
+
+## Contract Extraction Demo
+
+We also provide a contract key information extraction demo built on top of the hybrid PageIndex workflow.
+
+```bash
+conda activate PageIndex
+python3 examples/contract_extraction_demo.py
+```
+
+This demo:
+- builds a hybrid tree index from the sample contract PDF
+- prints structured progress logs during indexing
+- runs concurrent field extraction from a runtime schema
+- returns `status`, `value`, `evidence`, `pages`, and enum confidence (`High | Medium | Low`)
+
+## Whitebox Multi-Agent Contract Demo
+
+For a whitebox contract extraction walkthrough with multiple agents, tool calls, stable `doc_id` / `tree_id`, and cache reuse across repeated runs:
+
+```bash
+conda activate PageIndex
+pip3 install openai-agents
+python3 examples/contract_extraction_whitebox_demo.py
+```
+
+This demo shows:
+- whether the current PDF hit the cached hybrid tree
+- stable `doc_id` for the PDF and stable `tree_id` for the generated tree
+- an orchestrator agent handing off field tasks to worker agents
+- worker reasoning summaries, compact tool calls, and candidate pages
+- a merge/reviewer agent producing the final extraction JSON
 
 <!--
 # ☁️ Improved Tree Generation with PageIndex OCR

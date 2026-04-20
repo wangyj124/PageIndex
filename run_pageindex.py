@@ -1,3 +1,6 @@
+from pageindex.cli import main
+
+'''
 import argparse
 import os
 import json
@@ -75,7 +78,7 @@ if __name__ == "__main__":
         os.makedirs(output_dir, exist_ok=True)
         
         with open(output_file, 'w', encoding='utf-8') as f:
-            json.dump(toc_with_page_number, f, indent=2)
+            json.dump(toc_with_page_number, f, indent=2, ensure_ascii=False)
         
         print(f'Tree structure saved to: {output_file}')
             
@@ -132,3 +135,7 @@ if __name__ == "__main__":
             json.dump(toc_with_page_number, f, indent=2, ensure_ascii=False)
         
         print(f'Tree structure saved to: {output_file}')
+'''
+
+if __name__ == "__main__":
+    main()

@@ -1,10 +1,8 @@
 import json
 import PyPDF2
 
-try:
-    from .utils import get_number_of_pages, remove_fields
-except ImportError:
-    from utils import get_number_of_pages, remove_fields
+from .pdf import get_number_of_pages
+from .tree_utils import remove_fields
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -85,9 +83,12 @@ def get_document(documents: dict, doc_id: str) -> str:
         return json.dumps({'error': f'Document {doc_id} not found'})
     result = {
         'doc_id': doc_id,
+        'tree_id': doc_info.get('tree_id', ''),
+        'source_sha256': doc_info.get('source_sha256', ''),
         'doc_name': doc_info.get('doc_name', ''),
         'doc_description': doc_info.get('doc_description', ''),
         'type': doc_info.get('type', ''),
+        'index_strategy': doc_info.get('index_strategy', ''),
         'status': 'completed',
     }
     if doc_info.get('type') == 'pdf':

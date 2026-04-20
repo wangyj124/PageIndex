@@ -38,8 +38,9 @@ import pageindex.utils as utils
 PDF_URL = "https://arxiv.org/pdf/2603.15031"
 
 _EXAMPLES_DIR = Path(__file__).parent
-PDF_PATH = _EXAMPLES_DIR / "documents" / "attention-residuals.pdf"
-WORKSPACE = _EXAMPLES_DIR / "workspace"
+_ROOT_DIR = _EXAMPLES_DIR.parent
+PDF_PATH = _ROOT_DIR / "sample_data" / "documents" / "attention-residuals.pdf"
+WORKSPACE = _ROOT_DIR / "artifacts" / "workspace"
 
 AGENT_SYSTEM_PROMPT = """
 You are PageIndex, a document QA assistant.
