@@ -1,4 +1,5 @@
 import json
+import logging
 
 from pageindex.hybrid_pipeline import (
     add_preface_node_if_needed,
@@ -285,3 +286,37 @@ def test_build_hybrid_tree_pipeline_writes_debug_artifacts(monkeypatch, tmp_path
     assert (tmp_path / "logs" / "debug_02_aligned_flat_nodes.json").is_file()
     assert (tmp_path / "logs" / "debug_03_reconstructed_nodes.json").is_file()
     assert (tmp_path / "logs" / "debug_04_initial_tree.json").is_file()
+
+
+def test_build_hybrid_tree_pipeline_logs_reconstruction_messages_without_stdout(capsys, caplog):
+    markdown_text = "# Volume One\n\nintro\n\n## Chapter One\n\nbody one\n"
+    payload = make_payload(
+        4,
+        [
+            {"type": "paragraph", "page number": 1, "content": "Cover note"},
+            {"type": "heading", "page number": 2, "content": "Volume One"},
+            {"type": "heading", "page number": 3, "content": "Chapter One"},
+        ],
+    )
+    llm_response = json.dumps(
+        [
+            {"node_id": "001", "corrected_level": 1, "decision_reason": "Volume root."},
+            {"node_id": "002", "corrected_level": 2, "decision_reason": "Chapter child."},
+        ]
+    )
+    logger = logging.getLogger("tests.hybrid_pipeline")
+
+    with caplog.at_level(logging.DEBUG, logger="tests.hybrid_pipeline"):
+        build_hybrid_tree_pipeline(
+            markdown_text,
+            payload,
+            llm_fn=lambda model, prompt, chat_history=None: llm_response,
+            logger=logger,
+        )
+
+    stdout = capsys.readouterr().out
+    assert "Reconstruction added preface node" not in stdout
+    assert "Reconstruction level change" not in stdout
+    assert "Initial hybrid tree: top_level_count=" not in stdout
+    assert "Reconstruction added preface node" in caplog.text
+    assert "Initial hybrid tree: top_level_count=2" in caplog.text

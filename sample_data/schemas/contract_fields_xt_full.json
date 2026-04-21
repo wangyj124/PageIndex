@@ -1,0 +1,409 @@
+{
+  "fields": [
+    {
+      "name": "contract_total_price",
+      "label_cn": "合同总价",
+      "focus_cn": "合同价格",
+      "description": "提取‘合同价格-合同总价’相关合同约定/金额/条件",
+      "type": "string",
+      "required": false,
+      "instruction": ""
+    },
+    {
+      "name": "equipment_total_price",
+      "label_cn": "设备总价",
+      "focus_cn": "合同价格",
+      "description": "提取‘合同价格-设备总价’相关合同约定/金额/条件",
+      "type": "string",
+      "required": false,
+      "instruction": ""
+    },
+    {
+      "name": "pricing_technical_service_fee",
+      "label_cn": "技术服务费",
+      "focus_cn": "合同价格",
+      "description": "提取‘合同价格-技术服务费’相关合同约定/金额/条件",
+      "type": "string",
+      "required": false,
+      "instruction": "固定价格、封顶价格、据实结算？"
+    },
+    {
+      "name": "overseas_training_and_design_liaison_fee",
+      "label_cn": "国外技术培训、设联会费",
+      "focus_cn": "合同价格",
+      "description": "提取‘合同价格-国外技术培训、设联会费’相关合同约定/金额/条件",
+      "type": "string",
+      "required": false,
+      "instruction": ""
+    },
+    {
+      "name": "misc_freight_and_insurance_fee",
+      "label_cn": "杂运费（含保险费）",
+      "focus_cn": "合同价格",
+      "description": "提取‘合同价格-杂运费（含保险费）’相关合同约定/金额/条件",
+      "type": "string",
+      "required": false,
+      "instruction": ""
+    },
+    {
+      "name": "advance_payment",
+      "label_cn": "预付款",
+      "focus_cn": "付款方式",
+      "description": "提取‘付款方式-预付款’相关合同约定/金额/条件",
+      "type": "string",
+      "required": false,
+      "instruction": "确认付款比例，付款条件"
+    },
+    {
+      "name": "delivery_payment",
+      "label_cn": "交货款",
+      "focus_cn": "付款方式",
+      "description": "提取‘付款方式-交货款’相关合同约定/金额/条件",
+      "type": "string",
+      "required": false,
+      "instruction": ""
+    },
+    {
+      "name": "acceptance_payment",
+      "label_cn": "验收款",
+      "focus_cn": "付款方式",
+      "description": "提取‘付款方式-验收款’相关合同约定/金额/条件",
+      "type": "string",
+      "required": false,
+      "instruction": ""
+    },
+    {
+      "name": "warranty_retention",
+      "label_cn": "质保金",
+      "focus_cn": "付款方式",
+      "description": "提取‘付款方式-质保金’相关合同约定/金额/条件",
+      "type": "string",
+      "required": false,
+      "instruction": ""
+    },
+    {
+      "name": "payment_technical_service_fee",
+      "label_cn": "技术服务费",
+      "focus_cn": "付款方式",
+      "description": "提取‘付款方式-技术服务费’相关合同约定/金额/条件",
+      "type": "string",
+      "required": false,
+      "instruction": ""
+    },
+    {
+      "name": "transport_and_insurance_payment",
+      "label_cn": "运输及保险费",
+      "focus_cn": "付款方式",
+      "description": "提取‘付款方式-运输及保险费’相关合同约定/金额/条件",
+      "type": "string",
+      "required": false,
+      "instruction": ""
+    },
+    {
+      "name": "overseas_advance_payment",
+      "label_cn": "出国预付款",
+      "focus_cn": "付款方式",
+      "description": "提取‘付款方式-出国预付款’相关合同约定/金额/条件",
+      "type": "string",
+      "required": false,
+      "instruction": ""
+    },
+    {
+      "name": "overseas_actual_payment",
+      "label_cn": "出国实际款",
+      "focus_cn": "付款方式",
+      "description": "提取‘付款方式-出国实际款’相关合同约定/金额/条件",
+      "type": "string",
+      "required": false,
+      "instruction": ""
+    },
+    {
+      "name": "training_payment",
+      "label_cn": "培训费",
+      "focus_cn": "付款方式",
+      "description": "提取‘付款方式-培训费’相关合同约定/金额/条件",
+      "type": "string",
+      "required": false,
+      "instruction": ""
+    },
+    {
+      "name": "delivery_location",
+      "label_cn": "交货地点",
+      "focus_cn": "交货",
+      "description": "提取‘交货-交货地点’相关合同约定/金额/条件",
+      "type": "string",
+      "required": false,
+      "instruction": "工厂EXW交货？现场交货？\n码头、道路情况"
+    },
+    {
+      "name": "consignee",
+      "label_cn": "收货单位",
+      "focus_cn": "交货",
+      "description": "提取‘交货-收货单位’相关合同约定/金额/条件",
+      "type": "string",
+      "required": false,
+      "instruction": ""
+    },
+    {
+      "name": "equipment_delivery_schedule",
+      "label_cn": "设备交货计划",
+      "focus_cn": "交货",
+      "description": "提取‘交货-设备交货计划’相关合同约定/金额/条件",
+      "type": "string",
+      "required": false,
+      "instruction": ""
+    },
+    {
+      "name": "early_delivery_handling",
+      "label_cn": "设备提前交货处理",
+      "focus_cn": "交货",
+      "description": "提取‘交货-设备提前交货处理’相关合同约定/金额/条件",
+      "type": "string",
+      "required": false,
+      "instruction": ""
+    },
+    {
+      "name": "late_delivery_handling",
+      "label_cn": "设备迟交货处理",
+      "focus_cn": "交货",
+      "description": "提取‘交货-设备迟交货处理’相关合同约定/金额/条件",
+      "type": "string",
+      "required": false,
+      "instruction": ""
+    },
+    {
+      "name": "technical_documents_mailing_address",
+      "label_cn": "技术资料邮寄地址",
+      "focus_cn": "交货",
+      "description": "提取‘交货-技术资料邮寄地址’相关合同约定/金额/条件",
+      "type": "string",
+      "required": false,
+      "instruction": ""
+    },
+    {
+      "name": "technical_documents_delivery",
+      "label_cn": "技术资料交付",
+      "focus_cn": "交货",
+      "description": "提取‘交货-技术资料交付’相关合同约定/金额/条件",
+      "type": "string",
+      "required": false,
+      "instruction": ""
+    },
+    {
+      "name": "late_document_delivery_handling",
+      "label_cn": "资料迟交货处理",
+      "focus_cn": "交货",
+      "description": "提取‘交货-资料迟交货处理’相关合同约定/金额/条件",
+      "type": "string",
+      "required": false,
+      "instruction": ""
+    },
+    {
+      "name": "performance_acceptance_test",
+      "label_cn": "性能验收试验",
+      "focus_cn": "质保期",
+      "description": "提取‘质保期-性能验收试验’相关合同约定/金额/条件",
+      "type": "string",
+      "required": false,
+      "instruction": "签字条件"
+    },
+    {
+      "name": "preliminary_acceptance_certificate",
+      "label_cn": "初步验收证书",
+      "focus_cn": "质保期",
+      "description": "提取‘质保期-初步验收证书’相关合同约定/金额/条件",
+      "type": "string",
+      "required": false,
+      "instruction": "96小时或168小时"
+    },
+    {
+      "name": "final_acceptance",
+      "label_cn": "最终验收",
+      "focus_cn": "质保期",
+      "description": "提取‘质保期-最终验收’相关合同约定/金额/条件",
+      "type": "string",
+      "required": false,
+      "instruction": ""
+    },
+    {
+      "name": "warranty_period",
+      "label_cn": "质保期",
+      "focus_cn": "质保期",
+      "description": "提取‘质保期-质保期’相关合同约定/金额/条件",
+      "type": "string",
+      "required": false,
+      "instruction": "确认质保期时间和起算时间（试运行后或性能试验后）"
+    },
+    {
+      "name": "performance_penalty",
+      "label_cn": "性能罚款",
+      "focus_cn": "罚款",
+      "description": "提取‘罚款-性能罚款’相关合同约定/金额/条件",
+      "type": "string",
+      "required": false,
+      "instruction": "出力、热耗、排放、噪音、震动等"
+    },
+    {
+      "name": "late_delivery_penalty",
+      "label_cn": "迟交货罚款",
+      "focus_cn": "罚款",
+      "description": "提取‘罚款-迟交货罚款’相关合同约定/金额/条件",
+      "type": "string",
+      "required": false,
+      "instruction": ""
+    },
+    {
+      "name": "late_document_penalty",
+      "label_cn": "迟交资料罚款",
+      "focus_cn": "罚款",
+      "description": "提取‘罚款-迟交资料罚款’相关合同约定/金额/条件",
+      "type": "string",
+      "required": false,
+      "instruction": ""
+    },
+    {
+      "name": "reliability_run_delay",
+      "label_cn": "可靠性运行延误",
+      "focus_cn": "罚款",
+      "description": "提取‘罚款-可靠性运行延误’相关合同约定/金额/条件",
+      "type": "string",
+      "required": false,
+      "instruction": ""
+    },
+    {
+      "name": "service_penalty",
+      "label_cn": "服务罚款",
+      "focus_cn": "罚款",
+      "description": "提取‘罚款-服务罚款’相关合同约定/金额/条件",
+      "type": "string",
+      "required": false,
+      "instruction": ""
+    },
+    {
+      "name": "penalty_cap",
+      "label_cn": "罚款封顶",
+      "focus_cn": "罚款",
+      "description": "提取‘罚款-罚款封顶’相关合同约定/金额/条件",
+      "type": "string",
+      "required": false,
+      "instruction": ""
+    },
+    {
+      "name": "payment_penalty",
+      "label_cn": "付款罚款",
+      "focus_cn": "罚款",
+      "description": "提取‘罚款-付款罚款’相关合同约定/金额/条件",
+      "type": "string",
+      "required": false,
+      "instruction": ""
+    },
+    {
+      "name": "insurance_terms",
+      "label_cn": "保险",
+      "focus_cn": "保险",
+      "description": "提取‘保险-保险’相关合同约定/金额/条件",
+      "type": "string",
+      "required": false,
+      "instruction": ""
+    },
+    {
+      "name": "insurer",
+      "label_cn": "保险公司",
+      "focus_cn": "保险",
+      "description": "提取‘保险-保险公司’相关合同约定/金额/条件",
+      "type": "string",
+      "required": false,
+      "instruction": "是否有指定"
+    },
+    {
+      "name": "performance_bond",
+      "label_cn": "履约保函",
+      "focus_cn": "保函",
+      "description": "提取‘保函-履约保函’相关合同约定/金额/条件",
+      "type": "string",
+      "required": false,
+      "instruction": ""
+    },
+    {
+      "name": "advance_payment_bond",
+      "label_cn": "预付款保函",
+      "focus_cn": "保函",
+      "description": "提取‘保函-预付款保函’相关合同约定/金额/条件",
+      "type": "string",
+      "required": false,
+      "instruction": ""
+    },
+    {
+      "name": "service_scope",
+      "label_cn": "服务内容",
+      "focus_cn": "技术服务",
+      "description": "提取‘技术服务-服务内容’相关合同约定/金额/条件",
+      "type": "string",
+      "required": false,
+      "instruction": ""
+    },
+    {
+      "name": "service_personnel",
+      "label_cn": "服务人员",
+      "focus_cn": "技术服务",
+      "description": "提取‘技术服务-服务人员’相关合同约定/金额/条件",
+      "type": "string",
+      "required": false,
+      "instruction": ""
+    },
+    {
+      "name": "service_period_and_quotation",
+      "label_cn": "服务周期和报价",
+      "focus_cn": "技术服务",
+      "description": "提取‘技术服务-服务周期和报价’相关合同约定/金额/条件",
+      "type": "string",
+      "required": false,
+      "instruction": ""
+    },
+    {
+      "name": "contract_effectiveness",
+      "label_cn": "合同生效",
+      "focus_cn": "合同生效",
+      "description": "提取‘合同生效-合同生效’相关合同约定/金额/条件",
+      "type": "string",
+      "required": false,
+      "instruction": ""
+    },
+    {
+      "name": "supplier_shortlist",
+      "label_cn": "供应商短名单",
+      "focus_cn": "其他关注点",
+      "description": "提取‘其他关注点-供应商短名单’相关合同约定/金额/条件",
+      "type": "string",
+      "required": false,
+      "instruction": ""
+    },
+    {
+      "name": "price_list_vs_technical_agreement_scope",
+      "label_cn": "价格表与技术协议范围对比",
+      "focus_cn": "其他关注点",
+      "description": "提取‘其他关注点-价格表与技术协议范围对比’相关合同约定/金额/条件",
+      "type": "string",
+      "required": false,
+      "instruction": "技术主导，项目经理督促"
+    },
+    {
+      "name": "inspection_and_supervision_requirements",
+      "label_cn": "监造和监理等相关规定",
+      "focus_cn": "其他关注点",
+      "description": "提取‘其他关注点-监造和监理等相关规定’相关合同约定/金额/条件",
+      "type": "string",
+      "required": false,
+      "instruction": "京能集团旗下机组重点关注"
+    },
+    {
+      "name": "steam_turbine_packing_and_shipping_mode",
+      "label_cn": "汽轮机精装或散装发运",
+      "focus_cn": "其他关注点",
+      "description": "提取‘其他关注点-汽轮机精装或散装发运’相关合同约定/金额/条件",
+      "type": "string",
+      "required": false,
+      "instruction": ""
+    }
+  ]
+}

@@ -204,7 +204,7 @@ def build_hybrid_tree_pipeline(markdown_text, pdf_json_payload, total_pages=None
         original_level = node.get("original_level")
         corrected_level = node.get("corrected_level")
         if node.get("node_id") == "preface_00":
-            print(f"Reconstruction added preface node: {node.get('title')}")
+            logger.debug("Reconstruction added preface node: %s", node.get("title"))
             changed_level_nodes.append(
                 {
                     "title": node.get("title"),
@@ -215,9 +215,11 @@ def build_hybrid_tree_pipeline(markdown_text, pdf_json_payload, total_pages=None
             )
             continue
         if original_level != corrected_level:
-            print(
-                f"Reconstruction level change: {node.get('title')} | "
-                f"{original_level} -> {corrected_level}"
+            logger.debug(
+                "Reconstruction level change: %s | %s -> %s",
+                node.get("title"),
+                original_level,
+                corrected_level,
             )
             changed_level_nodes.append(
                 {
@@ -240,7 +242,7 @@ def build_hybrid_tree_pipeline(markdown_text, pdf_json_payload, total_pages=None
     tree = build_tree_and_intervals(reconstructed_nodes, total_pages=derived_total_pages)
     tree = attach_tree_metadata(tree, reconstructed_nodes)
     top_level_titles = [node.get("title", "") for node in tree]
-    print(f"Initial hybrid tree: top_level_count={len(tree)}, top_level_titles={top_level_titles}")
+    logger.info("Initial hybrid tree: top_level_count=%s, top_level_titles=%s", len(tree), top_level_titles)
     emit_debug_log(
         logger,
         "Initial hybrid tree built",

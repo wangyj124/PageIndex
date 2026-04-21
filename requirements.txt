@@ -1,7 +1,9 @@
 litellm==1.83.0
+fastapi>=0.115.0
 # openai-agents  # optional: required for examples/agentic_vectorless_rag_demo.py
 opendataloader-pdf
 pymupdf==1.26.4
 PyPDF2==3.0.1
+python-multipart>=0.0.9
 python-dotenv==1.1.0
 pyyaml==6.0.2

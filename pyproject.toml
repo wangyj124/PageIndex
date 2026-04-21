@@ -10,9 +10,11 @@ readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
   "litellm==1.83.0",
+  "fastapi>=0.115.0",
   "opendataloader-pdf",
   "pymupdf==1.26.4",
   "PyPDF2==3.0.1",
+  "python-multipart>=0.0.9",
   "python-dotenv==1.1.0",
   "pyyaml==6.0.2",
 ]
