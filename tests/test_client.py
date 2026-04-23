@@ -5,7 +5,7 @@ from pathlib import Path
 
 from pageindex.client import PageIndexClient
 from pageindex.identity import build_doc_id, build_tree_id, compute_file_sha256
-from pageindex.logging_utils import emit_progress_event
+from pageindex.logging_utils import JsonLogger, emit_progress_event
 
 
 def make_temp_dir():
@@ -190,3 +190,16 @@ def test_client_reuses_same_doc_id_for_same_pdf_bytes_across_paths(monkeypatch):
         assert reloaded_doc["tree_id"].startswith("tree_")
     finally:
         shutil.rmtree(temp_dir, ignore_errors=True)
+
+
+def test_json_logger_supports_standard_logging_args(tmp_path):
+    logger = JsonLogger("demo.pdf", base_dir=str(tmp_path))
+
+    logger.debug("Tree node %s spans %s pages", "Root", 3, node_id="001")
+
+    log_file = next(tmp_path.glob("*.json"))
+    payload = json.loads(log_file.read_text(encoding="utf-8"))
+
+    assert payload[-1]["level"] == "DEBUG"
+    assert payload[-1]["message"] == "Tree node Root spans 3 pages"
+    assert payload[-1]["node_id"] == "001"

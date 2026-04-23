@@ -287,11 +287,35 @@ uvicorn api:app --reload
 
 - `http://127.0.0.1:8000/docs`
 
-### 2. 上传 PDF 并发起抽取任务
+当前 API 采用“两阶段异步任务”模式：
+
+1. 先上传 PDF，异步构建文档树，拿到 `doc_id`
+2. 再基于 `doc_id` 和动态 `schema_def` 发起结构化抽取
+
+这样可以复用共享 `workspace` 中已构建好的文档索引，避免重复上传和重复建树。
+
+另外，当前接口统一采用标准响应结构：
+
+```json
+{
+  "code": 200,
+  "message": "响应提示信息",
+  "data": {}
+}
+```
+
+说明：
+
+- 成功响应统一为 HTTP `200`
+- 业务数据统一位于 `data` 字段
+- 常见错误也会保持同样的包裹结构，例如 `400/404/422/429/500`
+- 当前服务一次只处理一个活跃任务；如果已有 `pending` 或 `processing` 任务，新请求会收到 `429`
+
+### 2. 第一步：上传 PDF 并异步建树
 
 接口：
 
-- `POST /api/v1/upload_and_extract`
+- `POST /api/v1/upload_and_build`
 
 请求方式：
 
@@ -302,21 +326,72 @@ uvicorn api:app --reload
 示例命令：
 
 ```bash
-curl -X POST "http://127.0.0.1:8000/api/v1/upload_and_extract" ^
+curl -X POST "http://127.0.0.1:8000/api/v1/upload_and_build" ^
   -H "accept: application/json" ^
-  -F "file=@pdf/your_contract.pdf;type=application/pdf"
+  -F "file=@pdf/your_document.pdf;type=application/pdf"
 ```
 
 返回示例：
 
 ```json
 {
-  "task_id": "b7c2f5c5f1f6496f9858a2dbe4b9b4e0",
-  "message": "文件已接收，合同抽取任务已提交到后台"
+  "code": 200,
+  "message": "文件已接收，建树任务已提交到后台。",
+  "data": {
+    "task_id": "b7c2f5c5f1f6496f9858a2dbe4b9b4e0"
+  }
 }
 ```
 
-### 3. 查询任务状态
+建树任务完成后，可从任务状态返回的 `data` 中读取：
+
+- `doc_id`
+- `tree_id`
+- `source_file`
+- `workspace_dir`
+- `output_dir`
+
+### 3. 第二步：基于 `doc_id` 发起动态 schema 抽取
+
+接口：
+
+- `POST /api/v1/extract`
+
+请求体字段：
+
+- `doc_id`：上一步建树完成后得到的文档 ID
+- `schema_def`：动态抽取 schema
+- `require_evidence`：是否输出带证据溯源的结构化结果，默认 `false`
+
+`schema_def` 当前支持两种风格：
+
+- 现有字段列表风格：`{"fields": [{"name": "...", "description": "..."}]}`
+- 标准 JSON Schema 顶层 `properties` 风格
+
+如果 `require_evidence=true`，建议使用标准 JSON Schema 顶层 `properties` 风格。服务端会自动把结果整理为包含 `value/page_number/section_title/original_quote` 的结构。
+
+示例命令：
+
+```bash
+curl -X POST "http://127.0.0.1:8000/api/v1/extract" ^
+  -H "accept: application/json" ^
+  -H "Content-Type: application/json" ^
+  -d "{\"doc_id\":\"doc-build-demo\",\"schema_def\":{\"type\":\"object\",\"properties\":{\"party_a\":{\"type\":\"string\",\"description\":\"甲方\"},\"party_b\":{\"type\":\"string\",\"description\":\"乙方\"}}},\"require_evidence\":true}"
+```
+
+返回示例：
+
+```json
+{
+  "code": 200,
+  "message": "动态 Schema 抽取任务已提交到后台。",
+  "data": {
+    "task_id": "58b40f91b2fd4c79a55b8879947b0d23"
+  }
+}
+```
+
+### 4. 查询任务状态与进度
 
 接口：
 
@@ -328,19 +403,120 @@ curl -X POST "http://127.0.0.1:8000/api/v1/upload_and_extract" ^
 curl "http://127.0.0.1:8000/api/v1/task/b7c2f5c5f1f6496f9858a2dbe4b9b4e0"
 ```
 
-任务状态通常包含：
+查询成功时，返回结构同样为：
+
+```json
+{
+  "code": 200,
+  "message": "任务状态查询成功",
+  "data": {
+    "task_id": "b7c2f5c5f1f6496f9858a2dbe4b9b4e0",
+    "task_type": "extraction",
+    "status": "processing"
+  }
+}
+```
+
+其中 `data.status` 的任务基础状态通常包含：
 
 - `pending`
 - `processing`
 - `completed`
 - `failed`
 
-任务结果中会返回：
+`data` 中的任务元信息通常包含：
+
+- `task_id`
+- `task_type`
+- `created_at`
+- `workspace_dir`
+- `output_dir`
+- `error`
+
+其中：
+
+- 建树任务的 `task_type` 为 `build_tree`
+- 抽取任务的 `task_type` 为 `extraction`
+
+当抽取任务处于 `processing` 状态时，`data` 中还会返回：
+
+```json
+{
+  "code": 200,
+  "message": "任务状态查询成功",
+  "data": {
+    "task_id": "processing-task",
+    "task_type": "extraction",
+    "status": "processing",
+    "progress": {
+      "current": 5,
+      "total": 20,
+      "percent": 25.0
+    }
+  }
+}
+```
+
+任务完成后，`data` 中常见返回字段包括：
 
 - 输出文件路径
 - `doc_id`
-- workspace/output 路径
+- `tree_id`
+- `result_status`
+- `require_evidence`
+- `extracted_count`
+- `total_count`
 - 错误信息（如果失败）
+
+### 5. 常见错误响应
+
+当前 API 已统一错误返回格式，README 中最容易用到的几类如下。
+
+参数错误或文件类型错误：
+
+```json
+{
+  "code": 400,
+  "message": "仅支持上传 .pdf 文件",
+  "data": null
+}
+```
+
+任务不存在：
+
+```json
+{
+  "code": 404,
+  "message": "任务不存在",
+  "data": null
+}
+```
+
+请求参数校验失败：
+
+```json
+{
+  "code": 422,
+  "message": "请求参数校验失败",
+  "data": [
+    {
+      "type": "missing",
+      "loc": ["body", "doc_id"],
+      "msg": "Field required"
+    }
+  ]
+}
+```
+
+系统忙碌时：
+
+```json
+{
+  "code": 429,
+  "message": "系统当前正忙，一次只能处理一个任务，请稍后再试",
+  "data": null
+}
+```
 
 ## 示例输出说明
 
@@ -363,17 +539,22 @@ CLI 默认输出一个 `*_structure.json` 文件，常见字段包括：
 
 标准 PDF 建树与混合建树的字段细节可能略有差异，但整体都围绕“层级结构 + 页码范围 + 可选摘要”展开。
 
-### 2. 合同抽取输出
+### 2. 结构化抽取输出
 
-合同抽取会产出一个 `*_extraction.json` 文件，常见字段包括：
+抽取任务会在对应任务输出目录下生成一个 `*_extraction.json` 文件。
+
+- 当通过 API 调用时，结果文件名通常为 `<doc_id>_extraction.json`
+- 当通过示例脚本调用时，结果文件名可能按源文件名命名
+
+结果文件常见字段包括：
 
 - `status`
 - `doc_id`
 - `tree_id`
-- `source_file`
+- `require_evidence`
 - `extraction_result`
 
-`extraction_result` 中每个字段通常包含：
+当 `require_evidence=false` 时，`extraction_result` 中每个字段通常包含：
 
 - `status`
 - `value`
@@ -382,7 +563,22 @@ CLI 默认输出一个 `*_structure.json` 文件，常见字段包括：
 - `confidence`
 - `reason`
 
+当 `require_evidence=true` 时，`extraction_result` 中每个字段会被整理为更适合前端或审阅链路消费的结构，通常包含：
+
+- `value`
+- `page_number`
+- `section_title`
+- `original_quote`
+- `status`
+- `confidence`
+- `reason`
+
 这类结构适合继续对接前端、审批流或下游业务系统。
+
+需要注意：
+
+- API 自身返回的是标准响应包裹结构，任务详情在 `data` 里
+- 真正的抽取结果文件仍然保存在任务输出目录中，而不是直接内嵌在提交接口响应里
 
 ## 适用场景与限制
 
@@ -396,6 +592,7 @@ CLI 默认输出一个 `*_structure.json` 文件，常见字段包括：
 ### 当前限制
 
 - API 当前为轻量级内存任务状态管理，适合本地开发和小规模使用
+- 当前服务端限制同时只能存在 1 个活跃任务
 - 示例脚本默认依赖仓库内 `pdf/` 目录中的样例文件
 - 混合建树依赖 `opendataloader-pdf`
 - 白盒多 Agent 示例依赖额外的 `openai-agents`

@@ -2,6 +2,7 @@ import json
 import os
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 from .pdf import get_pdf_name
 
@@ -30,7 +31,18 @@ class JsonLogger:
         self.base_dir.mkdir(parents=True, exist_ok=True)
         self.log_data = []
 
-    def log(self, level, message, **kwargs):
+    def _coerce_message(self, message: Any, args: tuple[Any, ...]) -> Any:
+        if isinstance(message, dict) or not args:
+            return message
+        if isinstance(message, str):
+            try:
+                return message % args
+            except Exception:
+                return " ".join([message, *[str(arg) for arg in args]])
+        return " ".join([str(message), *[str(arg) for arg in args]])
+
+    def log(self, level, message, *args, **kwargs):
+        message = self._coerce_message(message, args)
         if isinstance(message, dict):
             payload = dict(message)
         else:
@@ -44,18 +56,18 @@ class JsonLogger:
         with open(self._filepath(), "w", encoding="utf-8") as f:
             json.dump(self.log_data, f, indent=2, ensure_ascii=False)
 
-    def info(self, message, **kwargs):
-        self.log("INFO", message, **kwargs)
+    def info(self, message, *args, **kwargs):
+        self.log("INFO", message, *args, **kwargs)
 
-    def error(self, message, **kwargs):
-        self.log("ERROR", message, **kwargs)
+    def error(self, message, *args, **kwargs):
+        self.log("ERROR", message, *args, **kwargs)
 
-    def debug(self, message, **kwargs):
-        self.log("DEBUG", message, **kwargs)
+    def debug(self, message, *args, **kwargs):
+        self.log("DEBUG", message, *args, **kwargs)
 
-    def exception(self, message, **kwargs):
+    def exception(self, message, *args, **kwargs):
         kwargs["exception"] = True
-        self.log("ERROR", message, **kwargs)
+        self.log("ERROR", message, *args, **kwargs)
 
     def _filepath(self):
         return os.path.join(self.base_dir, self.filename)

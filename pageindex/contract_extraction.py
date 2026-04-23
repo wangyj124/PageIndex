@@ -286,13 +286,25 @@ async def _extract_one_field(client, doc_id, field, structure_digest, semaphore,
             }
 
 
-async def _extract_contract_fields_async(client, doc_id, schema, max_concurrency=8, timeout_seconds=45, retries=1):
+async def _extract_contract_fields_async(
+    client,
+    doc_id,
+    schema,
+    max_concurrency=8,
+    timeout_seconds=45,
+    retries=1,
+    progress_callback=None,
+):
     fields = normalize_schema(schema)
     structure = json.loads(client.get_document_structure(doc_id))
     structure_digest = _build_structure_digest(structure)
     semaphore = asyncio.Semaphore(max(1, min(max_concurrency, len(fields))))
-    tasks = [
-        _extract_one_field(
+    total_fields = len(fields)
+    completed_count = 0
+
+    async def run_field(field):
+        nonlocal completed_count
+        result = await _extract_one_field(
             client,
             doc_id,
             field,
@@ -301,13 +313,25 @@ async def _extract_contract_fields_async(client, doc_id, schema, max_concurrency
             retries=retries,
             timeout_seconds=timeout_seconds,
         )
-        for field in fields
-    ]
+        completed_count += 1
+        if progress_callback is not None:
+            progress_callback(completed_count, total_fields)
+        return result
+
+    tasks = [run_field(field) for field in fields]
     results = await asyncio.gather(*tasks)
     return {name: payload for name, payload in results}
 
 
-def extract_contract_fields(client, doc_id, schema, max_concurrency=8, timeout_seconds=45, retries=1):
+def extract_contract_fields(
+    client,
+    doc_id,
+    schema,
+    max_concurrency=8,
+    timeout_seconds=45,
+    retries=1,
+    progress_callback=None,
+):
     coro = _extract_contract_fields_async(
         client,
         doc_id,
@@ -315,6 +339,7 @@ def extract_contract_fields(client, doc_id, schema, max_concurrency=8, timeout_s
         max_concurrency=max_concurrency,
         timeout_seconds=timeout_seconds,
         retries=retries,
+        progress_callback=progress_callback,
     )
     try:
         asyncio.get_running_loop()
