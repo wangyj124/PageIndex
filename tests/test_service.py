@@ -29,9 +29,10 @@ def test_build_document_tree_returns_doc_and_tree_ids(monkeypatch, tmp_path):
         def __init__(self, workspace):
             captured["workspace"] = workspace
 
-        def index(self, file_path, strategy="standard", progress_logger=None):
+        def index(self, file_path, strategy="standard", hybrid_output_dir=None, progress_logger=None):
             captured["index_file_path"] = file_path
             captured["index_strategy"] = strategy
+            captured["hybrid_output_dir"] = hybrid_output_dir
             captured["progress_logger"] = progress_logger
             return "doc-demo"
 
@@ -58,6 +59,7 @@ def test_build_document_tree_returns_doc_and_tree_ids(monkeypatch, tmp_path):
     assert captured["workspace"] == str(workspace_dir.resolve())
     assert captured["index_file_path"] == str(pdf_path.resolve())
     assert captured["index_strategy"] == "hybrid"
+    assert captured["hybrid_output_dir"] == str(output_dir.resolve())
     assert captured["tree_doc_id"] == "doc-demo"
     assert captured["logger_file_path"] == str(pdf_path.resolve())
     assert captured["logger_base_dir"] == str((output_dir.resolve() / "logs"))
@@ -92,9 +94,10 @@ def test_build_document_tree_converts_word_before_index(monkeypatch, tmp_path):
         def __init__(self, workspace):
             captured["workspace"] = workspace
 
-        def index(self, file_path, strategy="standard", progress_logger=None):
+        def index(self, file_path, strategy="standard", hybrid_output_dir=None, progress_logger=None):
             captured["index_file_path"] = file_path
             captured["index_strategy"] = strategy
+            captured["hybrid_output_dir"] = hybrid_output_dir
             captured["progress_logger"] = progress_logger
             return "doc-word-demo"
 
@@ -127,6 +130,7 @@ def test_build_document_tree_converts_word_before_index(monkeypatch, tmp_path):
     assert captured["convert_word_path"] == str(word_path.resolve())
     assert captured["convert_output_dir"] == str(output_dir.resolve())
     assert captured["index_file_path"] == str(converted_pdf_path.resolve())
+    assert captured["hybrid_output_dir"] == str(output_dir.resolve())
     assert captured["tree_doc_id"] == "doc-word-demo"
     assert captured["logger_file_path"] == str(word_path.resolve())
     assert [item["event"] for item in captured["logger_info"]] == [

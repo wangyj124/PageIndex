@@ -4,8 +4,10 @@ import pytest
 
 from pageindex.tree_reconstruction import (
     RECONSTRUCTION_SYSTEM_PROMPT,
+    RECONSTRUCTION_USER_PROMPT_TEMPLATE,
     TreeReconstructionError,
     build_context_payload,
+    repair_level_jumps_after_killed_nodes,
     reconstruct_tree_structure,
     validate_tree_logic,
 )
@@ -65,6 +67,13 @@ def test_build_context_payload_truncates_and_includes_fix_flag():
     ]
 
 
+def test_reconstruction_prompt_mentions_contract_signature_headings():
+    assert "此页为合同签字页" in RECONSTRUCTION_SYSTEM_PROMPT
+    assert "买方" in RECONSTRUCTION_SYSTEM_PROMPT
+    assert "卖方" in RECONSTRUCTION_SYSTEM_PROMPT
+    assert "缺少父级的更深层级" in RECONSTRUCTION_USER_PROMPT_TEMPLATE
+
+
 def test_validate_tree_logic_rejects_invalid_first_level():
     nodes = [
         {"node_id": "001", "corrected_level": 4},
@@ -94,6 +103,23 @@ def test_validate_tree_logic_skips_killed_nodes():
     ]
 
     assert validate_tree_logic(nodes) is True
+
+
+def test_repair_level_jumps_after_killed_nodes_lowers_over_deep_run():
+    nodes = [
+        {"node_id": "005", "title": "Volume I", "corrected_level": 1},
+        {"node_id": "006", "title": "Signature Page", "corrected_level": -1},
+        {"node_id": "007", "title": "Buyer", "corrected_level": 3},
+        {"node_id": "008", "title": "Seller", "corrected_level": 3},
+        {"node_id": "009", "title": "Volume II", "corrected_level": 1},
+    ]
+
+    repaired = repair_level_jumps_after_killed_nodes(nodes)
+
+    assert [node["corrected_level"] for node in repaired] == [1, -1, 2, 2, 1]
+    assert repaired[2]["auto_repair_reason"].startswith("Lowered level")
+    assert repaired[3]["auto_repair_reason"].startswith("Lowered level")
+    assert validate_tree_logic(repaired) is True
 
 
 def test_reconstruct_tree_structure_merges_llm_levels_and_decisions():

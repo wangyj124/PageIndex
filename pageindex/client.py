@@ -234,6 +234,7 @@ class PageIndexClient:
         )
         if json_path:
             resolved_json_path = json_path
+        debug_dir = str(Path(output_dir) / "logs")
         result, pdf_json_payload = run_hybrid_pipeline_for_sources(
             source_path=file_path,
             md_path=md_path,
@@ -242,6 +243,7 @@ class PageIndexClient:
             summary_token_threshold=200,
             progress_callback=progress_callback,
             progress_logger=progress_logger,
+            debug_dir=debug_dir,
         )
         emit_progress_event(
             "caching_pages",

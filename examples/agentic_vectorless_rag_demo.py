@@ -43,13 +43,13 @@ PDF_PATH = _ROOT_DIR / "sample_data" / "documents" / "attention-residuals.pdf"
 WORKSPACE = _ROOT_DIR / "artifacts" / "workspace"
 
 AGENT_SYSTEM_PROMPT = """
-You are PageIndex, a document QA assistant.
-TOOL USE:
-- Call get_document() first to confirm status and page/line count.
-- Call get_document_structure() to identify relevant page ranges.
-- Call get_page_content(pages="5-7") with tight ranges; never fetch the whole document.
-- Before each tool call, output one short sentence explaining the reason.
-Answer based only on tool output. Be concise.
+你是 PageIndex 文档问答助手。
+工具使用要求：
+- 先调用 get_document()，确认文档状态以及页数/行数。
+- 再调用 get_document_structure()，定位相关的页码范围。
+- 调用 get_page_content(pages="5-7") 时应尽量缩小范围，绝不要抓取整篇文档。
+- 每次调用工具前，先输出一句简短的话说明原因。
+只能根据工具输出作答，回答要简洁。
 """
 
 
@@ -62,20 +62,20 @@ def query_agent(client: PageIndexClient, doc_id: str, prompt: str, verbose: bool
 
     @function_tool
     def get_document() -> str:
-        """Get document metadata: status, page count, name, and description."""
+        """获取文档元信息：状态、页数、名称和描述。"""
         return client.get_document(doc_id)
 
     @function_tool
     def get_document_structure() -> str:
-        """Get the document's full tree structure (without text) to find relevant sections."""
+        """获取文档的完整树结构（不含正文），用于定位相关章节。"""
         return client.get_document_structure(doc_id)
 
     @function_tool
     def get_page_content(pages: str) -> str:
         """
-        Get the text content of specific pages or line numbers.
-        Use tight ranges: e.g. '5-7' for pages 5 to 7, '3,8' for pages 3 and 8, '12' for page 12.
-        For Markdown documents, use line numbers from the structure's line_num field.
+        获取指定页码或行号的文本内容。
+        请使用紧凑范围，例如 '5-7' 表示第 5 到 7 页，'3,8' 表示第 3 和第 8 页，'12' 表示第 12 页。
+        对于 Markdown 文档，请使用结构中 line_num 字段对应的行号。
         """
         return client.get_page_content(doc_id, pages)
 
@@ -184,6 +184,6 @@ if __name__ == "__main__":
     print("\n" + "=" * 60)
     print("Step 3: Agent Query (auto tool-use)")
     print("=" * 60)
-    question = "Explain Attention Residuals in simple language."
+    question = "请用通俗易懂的语言解释 Attention Residuals。"
     print(f"\nQuestion: '{question}'")
     query_agent(client, doc_id, question, verbose=True)

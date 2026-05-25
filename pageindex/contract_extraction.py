@@ -160,69 +160,69 @@ def _normalize_field_result(field_name, payload, default_pages=None):
 
 def _build_locator_prompt(field, structure_digest):
     return f"""
-You are locating the most relevant pages for one contract extraction task.
+你正在为一项合同字段抽取任务定位最相关的页面。
 
-Task field:
+任务字段：
 - name: {field.name}
 - description: {field.description}
 - type: {field.type}
 - required: {field.required}
-- instruction: {field.instruction or "N/A"}
+- instruction: {field.instruction or "无"}
 
-Document structure digest:
+文档结构摘要：
 {structure_digest}
 
-Rules:
-- Use only the structure digest above.
-- Return the smallest relevant page set, at most 3 pages total.
-- Prefer pages whose title or summary directly mention the target field.
-- If no strong candidate exists, return an empty pages list.
+规则：
+- 只能使用上面的结构摘要进行判断。
+- 返回最小范围的相关页集合，总页数最多 3 页。
+- 优先选择标题或摘要中直接提到目标字段的页面。
+- 如果没有强相关候选页，返回空的 pages 列表。
 
-Return JSON only with this schema:
+只返回 JSON，格式如下：
 {{
   "pages": [4, 5],
-  "reason": "why these pages are likely relevant"
+  "reason": "说明这些页面为什么可能相关"
 }}
 """.strip()
 
 
 def _build_extraction_prompt(field, page_content_json):
     return f"""
-You extract exactly one contract field from the provided page text.
+请从提供的页面文本中准确抽取一个合同字段。
 
-Field spec:
+字段定义：
 - name: {field.name}
 - description: {field.description}
 - type: {field.type}
 - required: {field.required}
-- instruction: {field.instruction or "N/A"}
+- instruction: {field.instruction or "无"}
 
-Page content:
+页面内容：
 {page_content_json}
 
-Output rules:
-- Return JSON only.
-- status must be exactly one of: "found", "not_found", "error"
-- confidence must be exactly one of: "High", "Medium", "Low"
-- If status is "found":
-  - provide non-empty value
-  - provide non-empty evidence copied from the page text
-  - include pages as an array of physical page numbers
-  - confidence standard:
-    - High: the value is explicitly stated in the text and the evidence directly supports it
-    - Medium: the value is derived from nearby context or mild inference
-    - Low: the evidence is indirect, ambiguous, or only weakly supportive
-- If status is "not_found" or "error":
-  - set value to ""
-  - set evidence to ""
-  - set confidence to "Low"
-  - include a non-empty reason
+输出规则：
+- 只返回 JSON。
+- status 必须严格是以下之一："found"、"not_found"、"error"
+- confidence 必须严格是以下之一："High"、"Medium"、"Low"
+- 如果 status 为 "found"：
+  - 必须提供非空的 value
+  - 必须提供从页面文本中复制的非空 evidence
+  - pages 必须是物理页码数组
+  - confidence 判定标准：
+    - High：文本中明确写出了该值，且 evidence 能直接支持结论
+    - Medium：该值需要结合附近上下文或轻度推断得到
+    - Low：证据间接、含糊，或支持力度较弱
+- 如果 status 为 "not_found" 或 "error"：
+  - value 设为 ""
+  - evidence 设为 ""
+  - confidence 设为 "Low"
+  - 必须提供非空的 reason
 
-Return JSON with this schema:
+返回 JSON，格式如下：
 {{
   "status": "found",
   "value": "example",
-  "evidence": "exact supporting text",
+  "evidence": "原文中的精确支持文本",
   "pages": [4],
   "confidence": "High",
   "reason": null

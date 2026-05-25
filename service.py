@@ -267,6 +267,7 @@ def build_document_tree(
     doc_id = client.index(
         str(indexed_file_path),
         strategy=strategy,
+        hybrid_output_dir=str(output_path_dir),
         progress_logger=progress_logger,
     )
     tree_id = client.get_tree_id(doc_id)

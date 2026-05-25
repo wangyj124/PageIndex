@@ -1,6 +1,6 @@
-model: "openai/gpt-5.4-mini"
+model: "gpt-5.4-mini"
 # model: "anthropic/claude-sonnet-4-6"
-retrieve_model: "openai/gpt-5.4"  # defaults to `model` if not set
+retrieve_model: "gpt-5.4"  # defaults to `model` if not set
 toc_check_page_num: 20
 max_page_num_each_node: 10
 max_token_num_each_node: 20000

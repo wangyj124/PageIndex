@@ -35,7 +35,17 @@ def test_client_hybrid_index_emits_progress_and_persists_workspace(monkeypatch):
             )
             return md_path, json_path
 
-        def fake_run(source_path, md_path, json_path, opt, summary_token_threshold, progress_callback=None, progress_logger=None):
+        def fake_run(
+            source_path,
+            md_path,
+            json_path,
+            opt,
+            summary_token_threshold,
+            progress_callback=None,
+            progress_logger=None,
+            debug_dir=None,
+        ):
+            assert debug_dir == str(workspace / "logs")
             for stage, message in [
                 ("loading_hybrid_sources", "Loading markdown and JSON hybrid sources"),
                 ("aligning_headings", "Aligning markdown headings with PDF JSON"),
@@ -120,7 +130,14 @@ def test_client_index_prints_progress_without_callback(monkeypatch, capsys):
         )
         monkeypatch.setattr(
             "pageindex.client.run_hybrid_pipeline_for_sources",
-            lambda source_path, md_path, json_path, opt, summary_token_threshold, progress_callback=None, progress_logger=None: (
+            lambda source_path,
+            md_path,
+            json_path,
+            opt,
+            summary_token_threshold,
+            progress_callback=None,
+            progress_logger=None,
+            debug_dir=None: (
                 {"doc_name": "demo", "doc_description": "", "structure": []},
                 {"kids": []},
             ),
@@ -163,7 +180,16 @@ def test_client_reuses_same_doc_id_for_same_pdf_bytes_across_paths(monkeypatch):
             )
             return md_path, json_path
 
-        def fake_run(source_path, md_path, json_path, opt, summary_token_threshold, progress_callback=None, progress_logger=None):
+        def fake_run(
+            source_path,
+            md_path,
+            json_path,
+            opt,
+            summary_token_threshold,
+            progress_callback=None,
+            progress_logger=None,
+            debug_dir=None,
+        ):
             calls["run"] += 1
             return (
                 {

@@ -70,6 +70,7 @@ def test_upload_and_build_runs_background_task(monkeypatch):
         query_body = query_response.json()
         assert query_body["code"] == 200
         assert query_body["data"]["status"] == "completed"
+        assert "extraction_result" not in query_body["data"]
 
 
 def test_upload_and_build_accepts_word_and_routes_to_service(monkeypatch):
@@ -151,7 +152,15 @@ def test_extract_runs_background_task_with_progress_and_evidence_flag(monkeypatc
         output_path = Path(output_dir)
         output_path.mkdir(parents=True, exist_ok=True)
         result_file = output_path / f"{doc_id}_extraction.json"
-        result_file.write_text("{}", encoding="utf-8")
+        result_file.write_text(
+            (
+                '{"status":"success","doc_id":"doc-extract-demo","tree_id":"tree-demo",'
+                '"require_evidence":true,"extraction_result":{'
+                '"party_a":{"value":"甲方公司","page_number":[1]},'
+                '"party_b":{"value":"乙方公司","page_number":[2]}}}'
+            ),
+            encoding="utf-8",
+        )
         return {
             "status": "success",
             "output_path": str(result_file.resolve()),
@@ -202,6 +211,10 @@ def test_extract_runs_background_task_with_progress_and_evidence_flag(monkeypatc
         query_body = query_response.json()
         assert query_body["code"] == 200
         assert query_body["data"]["status"] == "completed"
+        assert query_body["data"]["extraction_result"] == {
+            "party_a": {"value": "甲方公司", "page_number": [1]},
+            "party_b": {"value": "乙方公司", "page_number": [2]},
+        }
 
 
 def test_task_status_returns_progress_for_processing_task():
@@ -332,3 +345,29 @@ def test_extract_returns_wrapped_validation_error():
     assert body["code"] == 422
     assert body["message"] == "请求参数校验失败"
     assert isinstance(body["data"], list)
+
+
+def test_openapi_uses_realistic_swagger_examples():
+    schema = api.app.openapi()
+
+    upload_example = schema["paths"]["/api/v1/upload_and_build"]["post"]["responses"]["200"]["content"][
+        "application/json"
+    ]["example"]
+    assert upload_example["data"]["task_id"] == "a39e1289415e4c838dff9d7146300da0"
+
+    extraction_request_example = schema["components"]["schemas"]["ExtractionRequest"]["example"]
+    assert extraction_request_example["doc_id"] == "doc_1079388f5212c5d90f705bac4a6ad9612ff5d6cfa284802084d2ddb7d8544fab"
+    assert extraction_request_example["schema_def"]["properties"]["party_a"]["description"] == "甲方"
+    assert extraction_request_example["require_evidence"] is True
+
+    extraction_response_example = schema["paths"]["/api/v1/extract"]["post"]["responses"]["200"]["content"][
+        "application/json"
+    ]["example"]
+    assert extraction_response_example["data"]["task_id"] == "bbf7051b87ff4de394c834526a74df8a"
+
+    task_examples = schema["paths"]["/api/v1/task/{task_id}"]["get"]["responses"]["200"]["content"][
+        "application/json"
+    ]["examples"]
+    assert task_examples["extraction_task"]["value"]["data"]["task_type"] == "extraction"
+    assert "party_a" in task_examples["extraction_task"]["value"]["data"]["extraction_result"]
+    assert task_examples["build_tree_task"]["value"]["data"]["task_type"] == "build_tree"

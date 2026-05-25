@@ -15,12 +15,12 @@ Upload all documents into PageIndex to get their `doc_id` and tree structure.
 Generate a description for each document based on its PageIndex tree structure and node summaries.
 ```python
 prompt = f"""
-You are given a table of contents structure of a document. 
-Your task is to generate a one-sentence description for the document that makes it easy to distinguish from other documents.
-    
-Document tree structure: {PageIndex_Tree}
+你将获得一份文档的目录树结构。
+你的任务是为该文档生成一句话描述，使其容易与其他文档区分开。
 
-Directly return the description, do not include any other text.
+文档树结构：{PageIndex_Tree}
+
+直接返回描述，不要输出任何其他内容。
 """
 ```
 
@@ -32,11 +32,11 @@ Below is a sample prompt for document selection based on their descriptions:
 
 ```python
 prompt = f""" 
-You are given a list of documents with their IDs, file names, and descriptions. Your task is to select documents that may contain information relevant to answering the user query.
+你将获得一个文档列表，其中包含文档 ID、文件名和描述。你的任务是选出可能包含与用户问题相关信息的文档。
 
-Query: {query}
+问题：{query}
 
-Documents: [
+文档列表：[
     {
         "doc_id": "xxx",
         "doc_name": "xxx",
@@ -44,13 +44,13 @@ Documents: [
     }
 ]
 
-Response Format:
+回复格式：
 {{
-    "thinking": "<Your reasoning for document selection>",
-    "answer": <Python list of relevant doc_ids>, e.g. ['doc_id1', 'doc_id2']. Return [] if no documents are relevant.
+    "thinking": "<你选择这些文档的理由>",
+    "answer": <相关 doc_id 组成的 Python 列表>，例如 ['doc_id1', 'doc_id2']。如果没有相关文档，则返回 []。
 }}
 
-Return only the JSON structure, with no additional output.
+只返回 JSON 结构，不要输出其他内容。
 """
 ```
 

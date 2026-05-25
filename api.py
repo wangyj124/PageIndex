@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import shutil
 import uuid
 from datetime import datetime, timezone
@@ -9,7 +10,7 @@ from typing import Any, Optional
 from fastapi import BackgroundTasks, FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from service import build_document_tree, extract_dynamic_schema
 
@@ -25,14 +26,136 @@ COPY_CHUNK_SIZE = 1024 * 1024
 MAX_CONCURRENT_TASKS = 1
 SUPPORTED_UPLOAD_SUFFIXES = {".pdf", ".doc", ".docx"}
 
+UPLOAD_AND_BUILD_RESPONSE_EXAMPLE = {
+    "code": 200,
+    "message": "文件已接收，建树任务已提交到后台。",
+    "data": {
+        "task_id": "a39e1289415e4c838dff9d7146300da0",
+    },
+}
+
+EXTRACTION_REQUEST_EXAMPLE = {
+    "doc_id": "doc_1079388f5212c5d90f705bac4a6ad9612ff5d6cfa284802084d2ddb7d8544fab",
+    "schema_def": {
+        "type": "object",
+        "properties": {
+            "party_a": {
+                "type": "string",
+                "description": "甲方",
+            },
+            "party_b": {
+                "type": "string",
+                "description": "乙方",
+            },
+        },
+    },
+    "require_evidence": True,
+}
+
+EXTRACTION_RESPONSE_EXAMPLE = {
+    "code": 200,
+    "message": "动态 Schema 抽取任务已提交到后台。",
+    "data": {
+        "task_id": "bbf7051b87ff4de394c834526a74df8a",
+    },
+}
+
+EXTRACTION_TASK_QUERY_EXAMPLE = {
+    "code": 200,
+    "message": "任务状态查询成功",
+    "data": {
+        "task_id": "bbf7051b87ff4de394c834526a74df8a",
+        "task_type": "extraction",
+        "doc_id": "doc_1079388f5212c5d90f705bac4a6ad9612ff5d6cfa284802084d2ddb7d8544fab",
+        "status": "completed",
+        "output_path": (
+            "/home/sgc/PageIndex-MJ/artifacts/api_workspace/tasks/"
+            "bbf7051b87ff4de394c834526a74df8a/output/"
+            "doc_1079388f5212c5d90f705bac4a6ad9612ff5d6cfa284802084d2ddb7d8544fab_extraction.json"
+        ),
+        "error": "",
+        "created_at": "2026-05-18T04:43:41Z",
+        "workspace_dir": "/home/sgc/PageIndex-MJ/artifacts/api_workspace/workspace",
+        "schema_field_count": 2,
+        "extracted_count": 2,
+        "total_count": 2,
+        "require_evidence": True,
+        "started_at": "2026-05-18T04:43:41Z",
+        "output_dir": (
+            "/home/sgc/PageIndex-MJ/artifacts/api_workspace/tasks/"
+            "bbf7051b87ff4de394c834526a74df8a/output"
+        ),
+        "completed_at": "2026-05-18T04:44:11Z",
+        "result_status": "success",
+        "extraction_result": {
+            "party_a": {
+                "value": "潮州深能甘露热电有限公司",
+                "page_number": [5],
+                "section_title": "第一章 合同协议书 > 买方",
+                "original_quote": "买方 名称：潮州深能甘露热电有限公司",
+                "status": "found",
+                "confidence": "High",
+                "reason": "None",
+            },
+            "party_b": {
+                "value": "上海电气集团股份有限公司",
+                "page_number": [5],
+                "section_title": "第一章 合同协议书 > 卖方",
+                "original_quote": "卖方 名称：上海电气集团股份有限公司",
+                "status": "found",
+                "confidence": "High",
+                "reason": "None",
+            },
+        },
+    },
+}
+
+BUILD_TREE_TASK_QUERY_EXAMPLE = {
+    "code": 200,
+    "message": "任务状态查询成功",
+    "data": {
+        "task_id": "a39e1289415e4c838dff9d7146300da0",
+        "task_type": "build_tree",
+        "status": "completed",
+        "file_name": "甘露机岛合同-20181211版最终-签字版（无价格版）.docx",
+        "file_path": (
+            "/home/sgc/PageIndex-MJ/artifacts/api_workspace/tasks/"
+            "a39e1289415e4c838dff9d7146300da0/input/"
+            "甘露机岛合同-20181211版最终-签字版（无价格版）.docx"
+        ),
+        "output_path": "",
+        "error": "",
+        "created_at": "2026-05-18T04:28:39Z",
+        "workspace_dir": "/home/sgc/PageIndex-MJ/artifacts/api_workspace/workspace",
+        "started_at": "2026-05-18T04:28:39Z",
+        "output_dir": (
+            "/home/sgc/PageIndex-MJ/artifacts/api_workspace/tasks/"
+            "a39e1289415e4c838dff9d7146300da0/output"
+        ),
+        "completed_at": "2026-05-18T04:38:48Z",
+        "result_status": "success",
+        "doc_id": "doc_1079388f5212c5d90f705bac4a6ad9612ff5d6cfa284802084d2ddb7d8544fab",
+        "tree_id": "tree_7b9762e3f834d7c3416b544462b57e4a75dfffbafaafc9f350b3ef9c06f4ccb0",
+        "source_file": (
+            "/home/sgc/PageIndex-MJ/artifacts/api_workspace/tasks/"
+            "a39e1289415e4c838dff9d7146300da0/output/"
+            "甘露机岛合同-20181211版最终-签字版（无价格版）.pdf"
+        ),
+    },
+}
+
 
 class StandardResponse(BaseModel):
+    model_config = ConfigDict(json_schema_extra={"example": UPLOAD_AND_BUILD_RESPONSE_EXAMPLE})
+
     code: int = Field(..., description="业务状态码，成功统一为 200")
     message: str = Field(..., description="响应提示信息")
     data: Optional[Any] = Field(default=None, description="响应数据负载")
 
 
 class ExtractionRequest(BaseModel):
+    model_config = ConfigDict(json_schema_extra={"example": EXTRACTION_REQUEST_EXAMPLE})
+
     doc_id: str = Field(..., description="已完成建树的文档 ID")
     schema_def: dict[str, Any] = Field(..., description="动态抽取 schema 定义")
     require_evidence: bool = Field(default=False, description="是否启用带证据溯源的结果结构")
@@ -82,6 +205,20 @@ def _count_schema_fields(schema: dict[str, Any]) -> int:
     if isinstance(schema.get("properties"), dict):
         return len(schema["properties"])
     return 0
+
+
+def _load_extraction_result(output_path: str) -> dict[str, Any]:
+    """读取抽取结果文件中与动态 schema 对齐的字段结果。"""
+    if not output_path:
+        return {}
+
+    result_path = Path(output_path)
+    if not result_path.is_file():
+        return {}
+
+    payload = json.loads(result_path.read_text(encoding="utf-8"))
+    extraction_result = payload.get("extraction_result", {})
+    return extraction_result if isinstance(extraction_result, dict) else {}
 
 
 def _process_build_tree_task(task_id: str, file_path: str, task_dir: str) -> None:
@@ -174,6 +311,7 @@ def _process_extraction_task(
         return
 
     result_payload = {key: value for key, value in result.items() if key != "status"}
+    result_payload["extraction_result"] = _load_extraction_result(str(result_payload.get("output_path", "")))
     _update_task(
         task_id,
         status="completed",
@@ -200,7 +338,20 @@ async def handle_unexpected_exception(request: Request, exc: Exception) -> JSONR
     return _error_response(500, f"服务器内部错误: {exc}")
 
 
-@app.post("/api/v1/upload_and_build", response_model=StandardResponse)
+@app.post(
+    "/api/v1/upload_and_build",
+    response_model=StandardResponse,
+    responses={
+        200: {
+            "description": "文件接收成功，建树任务已进入后台队列。",
+            "content": {
+                "application/json": {
+                    "example": UPLOAD_AND_BUILD_RESPONSE_EXAMPLE,
+                }
+            },
+        }
+    },
+)
 async def upload_and_build(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
@@ -253,7 +404,20 @@ async def upload_and_build(
     )
 
 
-@app.post("/api/v1/extract", response_model=StandardResponse)
+@app.post(
+    "/api/v1/extract",
+    response_model=StandardResponse,
+    responses={
+        200: {
+            "description": "动态 Schema 抽取任务已进入后台队列。",
+            "content": {
+                "application/json": {
+                    "example": EXTRACTION_RESPONSE_EXAMPLE,
+                }
+            },
+        }
+    },
+)
 async def extract_with_dynamic_schema(
     request: ExtractionRequest,
     background_tasks: BackgroundTasks,
@@ -298,7 +462,29 @@ async def extract_with_dynamic_schema(
     )
 
 
-@app.get("/api/v1/task/{task_id}", response_model=StandardResponse)
+@app.get(
+    "/api/v1/task/{task_id}",
+    response_model=StandardResponse,
+    responses={
+        200: {
+            "description": "任务状态查询成功。",
+            "content": {
+                "application/json": {
+                    "examples": {
+                        "extraction_task": {
+                            "summary": "字段提取任务查询",
+                            "value": EXTRACTION_TASK_QUERY_EXAMPLE,
+                        },
+                        "build_tree_task": {
+                            "summary": "建树任务查询",
+                            "value": BUILD_TREE_TASK_QUERY_EXAMPLE,
+                        },
+                    }
+                }
+            },
+        }
+    },
+)
 async def get_task_status(task_id: str) -> StandardResponse:
     """查询指定任务的当前状态与产物路径。"""
     task_info = task_store.get(task_id)

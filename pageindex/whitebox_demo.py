@@ -220,15 +220,15 @@ async def _run_agent_with_sdk(name, instructions, prompt, tools, *, model=None, 
 
 def _make_tools(client, doc_id, decorate=True):
     def get_document() -> str:
-        """Get document metadata including doc_id, tree_id, status, and page count."""
+        """获取文档元信息，包括 doc_id、tree_id、状态和页数。"""
         return client.get_document(doc_id)
 
     def get_document_structure() -> str:
-        """Get the cached tree structure without large text fields."""
+        """获取去除了大段正文的缓存树结构。"""
         return client.get_document_structure(doc_id)
 
     def get_page_content(pages: str) -> str:
-        """Get text for a compact PDF page selection like '4-5' or '7'."""
+        """获取紧凑页码范围的文本，例如 '4-5' 或 '7'。"""
         return client.get_page_content(doc_id, pages)
 
     if decorate:

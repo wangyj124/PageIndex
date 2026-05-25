@@ -122,7 +122,7 @@ def fill_preface_text_if_needed(flat_nodes, pdf_json_payload):
     return flat_nodes
 
 
-def build_initial_flat_nodes(markdown_text, pdf_json_payload, default_page=1, logger=None):
+def build_initial_flat_nodes(markdown_text, pdf_json_payload, default_page=1, logger=None, debug_dir=DEBUG_LOG_DIR):
     markdown_nodes, markdown_lines = extract_nodes_from_markdown(markdown_text)
     markdown_sections = extract_node_text_content(markdown_nodes, markdown_lines)
 
@@ -132,6 +132,7 @@ def build_initial_flat_nodes(markdown_text, pdf_json_payload, default_page=1, lo
         markdown_sections=markdown_sections,
         default_page=default_page,
         logger=logger,
+        debug_dir=debug_dir,
     )
 
     flat_nodes = []
@@ -171,7 +172,16 @@ def attach_tree_metadata(tree_nodes, reconstructed_nodes):
     return enrich(tree_nodes)
 
 
-def build_hybrid_tree_pipeline(markdown_text, pdf_json_payload, total_pages=None, model=None, llm_fn=None, logger=None, progress_callback=None):
+def build_hybrid_tree_pipeline(
+    markdown_text,
+    pdf_json_payload,
+    total_pages=None,
+    model=None,
+    llm_fn=None,
+    logger=None,
+    progress_callback=None,
+    debug_dir=DEBUG_LOG_DIR,
+):
     logger = logger or logging.getLogger(__name__)
     derived_total_pages = total_pages or pdf_json_payload.get("number of pages") or 0
     if derived_total_pages < 1:
@@ -180,10 +190,16 @@ def build_hybrid_tree_pipeline(markdown_text, pdf_json_payload, total_pages=None
     if progress_callback:
         progress_callback("aligning_headings", "Aligning markdown headings with PDF JSON")
     emit_debug_log(logger, "Building initial flat nodes from markdown and JSON")
-    flat_nodes = build_initial_flat_nodes(markdown_text, pdf_json_payload, default_page=1, logger=logger)
+    flat_nodes = build_initial_flat_nodes(
+        markdown_text,
+        pdf_json_payload,
+        default_page=1,
+        logger=logger,
+        debug_dir=debug_dir,
+    )
     if not flat_nodes:
-        dump_debug_json(f"{DEBUG_LOG_DIR}/debug_03_reconstructed_nodes.json", [], logger=logger)
-        dump_debug_json(f"{DEBUG_LOG_DIR}/debug_04_initial_tree.json", [], logger=logger)
+        dump_debug_json(f"{debug_dir}/debug_03_reconstructed_nodes.json", [], logger=logger)
+        dump_debug_json(f"{debug_dir}/debug_04_initial_tree.json", [], logger=logger)
         return {
             "flat_nodes": [],
             "reconstructed_nodes": [],
@@ -236,7 +252,7 @@ def build_hybrid_tree_pipeline(markdown_text, pdf_json_payload, total_pages=None
         changed_level_nodes=changed_level_nodes,
         reconstructed_node_count=len(reconstructed_nodes),
     )
-    dump_debug_json(f"{DEBUG_LOG_DIR}/debug_03_reconstructed_nodes.json", reconstructed_nodes, logger=logger)
+    dump_debug_json(f"{debug_dir}/debug_03_reconstructed_nodes.json", reconstructed_nodes, logger=logger)
 
     emit_debug_log(logger, "Building final tree and intervals")
     tree = build_tree_and_intervals(reconstructed_nodes, total_pages=derived_total_pages)
@@ -249,7 +265,7 @@ def build_hybrid_tree_pipeline(markdown_text, pdf_json_payload, total_pages=None
         top_level_count=len(tree),
         top_level_titles=top_level_titles,
     )
-    dump_debug_json(f"{DEBUG_LOG_DIR}/debug_04_initial_tree.json", tree, logger=logger)
+    dump_debug_json(f"{debug_dir}/debug_04_initial_tree.json", tree, logger=logger)
 
     return {
         "flat_nodes": flat_nodes,

@@ -146,6 +146,7 @@ def run_hybrid_pipeline_for_sources(
     summary_token_threshold,
     progress_callback=None,
     progress_logger=None,
+    debug_dir=None,
 ):
     source_path = Path(source_path)
     emit_progress_event(
@@ -164,6 +165,7 @@ def run_hybrid_pipeline_for_sources(
         pdf_json_payload,
         model=opt.model,
         logger=progress_logger,
+        debug_dir=debug_dir or "logs",
         progress_callback=lambda stage, message, extra=None: emit_progress_event(
             stage,
             message,

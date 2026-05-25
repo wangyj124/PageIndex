@@ -6,16 +6,16 @@ A simple strategy is to use an LLM agent to conduct tree search. Here is a basic
 
 ```python
 prompt = f"""
-You are given a query and the tree structure of a document.
-You need to find all nodes that are likely to contain the answer.
+你将获得一个查询，以及一份文档的树结构。
+你的任务是找出所有可能包含答案的节点。
 
-Query: {query}
+查询：{query}
 
-Document tree structure: {PageIndex_Tree}
+文档树结构：{PageIndex_Tree}
 
-Reply in the following JSON format:
+请按以下 JSON 格式回复：
 {{
-  "thinking": <your reasoning about which nodes are relevant>,
+  "thinking": <你对哪些节点相关的判断理由>,
   "node_list": [node_id1, node_id2, ...]
 }}
 """
@@ -39,18 +39,18 @@ Integrating preference into the tree search prompt.
 
 ```python
 prompt = f"""
-You are given a question and a tree structure of a document.
-You need to find all nodes that are likely to contain the answer.
+你将获得一个问题，以及一份文档的树结构。
+你的任务是找出所有可能包含答案的节点。
 
-Query: {query}
+问题：{query}
 
-Document tree structure:  {PageIndex_Tree}
+文档树结构：{PageIndex_Tree}
 
-Expert Knowledge of relevant sections: {Preference}
+相关章节的专家知识：{Preference}
 
-Reply in the following JSON format:
+请按以下 JSON 格式回复：
 {{
-  "thinking": <reasoning about which nodes are relevant>,
+  "thinking": <你对哪些节点相关的判断理由>,
   "node_list": [node_id1, node_id2, ...]
 }}
 """
