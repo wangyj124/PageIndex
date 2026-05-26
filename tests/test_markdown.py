@@ -6,10 +6,14 @@ from pathlib import Path
 
 import pytest
 
+from pageindex.hybrid_index import build_pdf_pages_from_json_payload
 from pageindex.markdown import (
+    build_pdf_page_text_map,
+    build_tree_from_hybrid_headings,
     extract_hybrid_toc_with_fallback,
     extract_nodes_from_markdown,
     generate_summaries_for_structure_md,
+    make_orphan_node,
     md_to_tree,
     md_to_tree_hybrid,
     normalize_title,
@@ -45,6 +49,98 @@ def test_extract_nodes_ignores_code_block_headers():
 
 def test_normalize_title_removes_whitespace_and_punctuation():
     assert normalize_title(" 1. Heading (Part A)! ") == "1headingparta"
+
+
+def test_build_pdf_page_text_map_collects_nested_list_item_text_and_filters_page_footer():
+    payload = {
+        "kids": [
+            {
+                "type": "list",
+                "page number": 3,
+                "list items": [
+                    {
+                        "type": "list item",
+                        "content": "1. Main clause",
+                        "kids": [{"type": "paragraph", "content": "continued wording"}],
+                    }
+                ],
+            },
+            {
+                "type": "footer",
+                "page number": 3,
+                "kids": [{"type": "paragraph", "content": "3"}],
+            },
+        ]
+    }
+
+    assert build_pdf_page_text_map(payload)[3] == "1. Main clause\ncontinued wording"
+
+
+def test_build_pdf_page_text_map_collects_nested_table_cell_text():
+    payload = {
+        "kids": [
+            {
+                "type": "table",
+                "page number": 46,
+                "rows": [
+                    {
+                        "type": "table row",
+                        "cells": [
+                            {"type": "table cell", "content": "Equipment"},
+                            {"type": "table cell", "kids": [{"type": "paragraph", "content": "Quantity"}]},
+                        ],
+                    }
+                ],
+            }
+        ]
+    }
+
+    assert build_pdf_page_text_map(payload)[46] == "Equipment\nQuantity"
+
+
+def test_build_pdf_pages_from_json_payload_caches_nested_text():
+    payload = {
+        "kids": [
+            {"type": "list", "page number": 3, "list items": [{"type": "list item", "content": "List clause"}]},
+            {
+                "type": "table",
+                "page number": 46,
+                "rows": [{"type": "table row", "cells": [{"type": "table cell", "content": "Table value"}]}],
+            },
+        ]
+    }
+
+    assert build_pdf_pages_from_json_payload(payload) == [
+        {"page": 3, "content": "List clause"},
+        {"page": 46, "content": "Table value"},
+    ]
+
+
+def test_nested_page_text_feeds_probe_orphan_and_missing_markdown_text_fallbacks():
+    phrase = "The supplier shall deliver nested contract equipment within ten days."
+    payload = {
+        "kids": [
+            {
+                "type": "list",
+                "page number": 8,
+                "list items": [{"type": "list item", "content": phrase}],
+            }
+        ]
+    }
+    page_text_map = build_pdf_page_text_map(payload)
+    markdown_headings = [{"title": "Unmatched Heading", "level": 1, "line_num": 1, "md_text": phrase}]
+
+    matched = extract_hybrid_toc_with_fallback(markdown_headings, [], page_text_map)
+    orphan = make_orphan_node(8, 8, page_text_map)
+    fallback_node = build_tree_from_hybrid_headings(
+        [{"title": "Fallback Heading", "level": 1, "page_number": 8}],
+        8,
+        page_text_map,
+    )[0]
+
+    assert matched[0]["physical_index"] == 8
+    assert orphan["text"] == phrase
+    assert fallback_node["text"] == phrase
 
 
 def test_extract_hybrid_toc_with_fallback_matches_markdown_to_json():

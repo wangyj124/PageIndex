@@ -120,14 +120,43 @@ def parse_pdf_heading_level(item):
     return FALLBACK_HEADING_LEVELS.get(level_name, 6)
 
 
+def _is_pure_page_number_footer(text):
+    return bool(
+        re.fullmatch(
+            r"[-\u2013\u2014]?\s*(?:(?:page\s*)?\d+\s*(?:(?:/|of)\s*\d+)?|(?:\u7b2c\s*)?\d+\s*\u9875)\s*[-\u2013\u2014]?",
+            text,
+            flags=re.IGNORECASE,
+        )
+    )
+
+
 def build_pdf_page_text_map(payload):
     page_chunks = defaultdict(list)
-    for child in payload.get("kids", []):
-        page_number = child.get("page number")
-        content = str(child.get("content", "")).strip()
-        if not isinstance(page_number, int) or not content:
-            continue
-        page_chunks[page_number].append(content)
+
+    def collect_text(node, inherited_page=None, in_footer=False):
+        if isinstance(node, list):
+            for item in node:
+                collect_text(item, inherited_page, in_footer)
+            return
+        if not isinstance(node, dict):
+            return
+
+        page_number = node.get("page number")
+        if not isinstance(page_number, int):
+            page_number = inherited_page
+
+        current_in_footer = in_footer or str(node.get("type", "")).strip().lower() == "footer"
+        raw_content = node.get("content")
+        content = str(raw_content).strip() if raw_content is not None else ""
+        is_footer_page_number = current_in_footer and _is_pure_page_number_footer(content)
+        if isinstance(page_number, int) and content and not is_footer_page_number:
+            page_chunks[page_number].append(content)
+
+        for value in node.values():
+            if isinstance(value, (dict, list)):
+                collect_text(value, page_number, current_in_footer)
+
+    collect_text(payload.get("kids", []))
     return {page: "\n".join(chunks) for page, chunks in sorted(page_chunks.items())}
 
 
