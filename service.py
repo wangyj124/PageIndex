@@ -5,7 +5,7 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any, Callable
 
-from pageindex import PageIndexClient, extract_contract_fields, normalize_schema
+from pageindex import PageIndexClient, extract_contract_fields
 from pageindex.logging_utils import JsonLogger
 from pageindex.utils import convert_word_to_pdf
 
@@ -55,7 +55,7 @@ def _normalize_to_extraction_schema(schema: dict[str, Any] | list[dict[str, Any]
 
         description = str(property_schema.get("description", "")).strip() or f"提取字段“{name}”的值"
         field_type = property_schema.get("type", "string")
-        instruction = ""
+        instruction = str(property_schema.get("instruction", "") or "").strip()
 
         # evidence 注入后的字段会被包装成 object，这里退回到 value 子字段的定义，
         # 以便继续适配当前 field-based 的抽取引擎。
@@ -64,7 +64,9 @@ def _normalize_to_extraction_schema(schema: dict[str, Any] | list[dict[str, Any]
             if isinstance(value_schema, dict):
                 description = str(value_schema.get("description", "")).strip() or description
                 field_type = value_schema.get("type", "string")
-            instruction = "请基于原文同时给出 value、page_number、section_title、original_quote。"
+                instruction = instruction or str(value_schema.get("instruction", "") or "").strip()
+            evidence_instruction = "请基于原文同时给出 value、page_number、section_title、original_quote。"
+            instruction = "\n".join(filter(None, (instruction, evidence_instruction)))
 
         fields.append(
             {
@@ -117,9 +119,11 @@ def _inject_evidence_to_schema(original_schema: dict[str, Any]) -> dict[str, Any
         field_schema = field_schema if isinstance(field_schema, dict) else {}
         value_type = field_schema.get("type", "string")
         value_description = str(field_schema.get("description", "")).strip() or f"字段“{field_name}”的值"
+        instruction = str(field_schema.get("instruction", "") or "").strip()
 
         new_properties[field_name] = {
             "type": "object",
+            "instruction": instruction,
             "properties": {
                 "value": {
                     "type": value_type,

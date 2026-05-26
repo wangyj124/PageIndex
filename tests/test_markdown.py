@@ -311,6 +311,42 @@ def test_md_to_tree_hybrid_auto_discovers_same_name_json():
         shutil.rmtree(temp_dir, ignore_errors=True)
 
 
+def test_md_to_tree_hybrid_inserts_leading_cover_node_without_replacing_first_heading():
+    temp_dir = make_temp_dir()
+    try:
+        md_path = temp_dir / "demo.md"
+        json_path = temp_dir / "demo.json"
+        leading_text = "买方合同编号：BUY-001 卖方合同编号：SELL-002"
+        md_path.write_text(f"{leading_text}\n\n# 机岛设备采购合同\n\n正文\n", encoding="utf-8")
+        write_json_payload(
+            json_path,
+            total_pages=1,
+            kids=[
+                {"type": "paragraph", "page number": 1, "content": leading_text},
+                {"type": "heading", "page number": 1, "heading level": 1, "content": "机岛设备采购合同"},
+            ],
+        )
+
+        result = asyncio.run(
+            md_to_tree_hybrid(
+                md_path=str(md_path),
+                json_path=str(json_path),
+                if_add_node_summary="yes",
+                summary_token_threshold=200,
+                if_add_node_text="yes",
+                if_add_node_id="yes",
+                cover_classifier_fn=lambda model, prompt: '{"is_contract_cover": true}',
+            )
+        )
+
+        assert [node["title"] for node in result["structure"]] == ["合同封面", "机岛设备采购合同"]
+        assert result["structure"][0]["text"] == leading_text
+        assert result["structure"][0]["summary"] == leading_text
+        assert result["structure"][1]["start_page"] == 1
+    finally:
+        shutil.rmtree(temp_dir, ignore_errors=True)
+
+
 def test_md_to_tree_hybrid_raises_when_json_missing():
     temp_dir = make_temp_dir()
     try:

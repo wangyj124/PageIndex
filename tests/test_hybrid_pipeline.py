@@ -37,6 +37,111 @@ def test_build_initial_flat_nodes_preserves_markdown_order_and_fallback_fields()
     assert flat_nodes[1]["original_level"] == 2
 
 
+def test_build_hybrid_tree_pipeline_preserves_leading_contract_number_before_first_page_heading():
+    leading_text = "买方合同编号：BUY-001 卖方合同编号：SELL-002"
+    markdown_text = f"{leading_text}\n\n# 机岛设备采购合同\n\n正文\n"
+    payload = make_payload(
+        1,
+        [
+            {"type": "paragraph", "page number": 1, "content": leading_text},
+            {"type": "heading", "page number": 1, "content": "机岛设备采购合同"},
+            {"type": "paragraph", "page number": 1, "content": "正文"},
+        ],
+    )
+
+    result = build_hybrid_tree_pipeline(
+        markdown_text,
+        payload,
+        llm_fn=lambda model, prompt, chat_history=None: json.dumps(
+            [{"node_id": "001", "corrected_level": 1, "decision_reason": "Contract title."}]
+        ),
+        cover_classifier_fn=lambda model, prompt: '{"is_contract_cover": false}',
+    )
+
+    assert result["tree"][0]["title"] == "首页前导信息"
+    assert result["tree"][0]["text"] == leading_text
+    assert result["tree"][0]["start_index"] == 1
+    assert result["tree"][0]["end_index"] == 1
+    assert result["tree"][1]["title"] == "机岛设备采购合同"
+
+
+def test_build_hybrid_tree_pipeline_names_detected_cover_node_contract_cover():
+    leading_text = "买方合同编号：BUY-001 卖方合同编号：SELL-002"
+    markdown_text = f"{leading_text}\n\n# 机岛设备采购合同\n"
+    payload = make_payload(
+        1,
+        [
+            {"type": "paragraph", "page number": 1, "content": leading_text},
+            {"type": "heading", "page number": 1, "content": "机岛设备采购合同"},
+        ],
+    )
+
+    result = build_hybrid_tree_pipeline(
+        markdown_text,
+        payload,
+        llm_fn=lambda model, prompt, chat_history=None: json.dumps(
+            [{"node_id": "001", "corrected_level": 1, "decision_reason": "Contract title."}]
+        ),
+        cover_classifier_fn=lambda model, prompt: '{"is_contract_cover": true}',
+    )
+
+    assert result["tree"][0]["title"] == "合同封面"
+    assert result["tree"][1]["title"] == "机岛设备采购合同"
+
+
+def test_build_hybrid_tree_pipeline_keeps_non_cover_leading_text_without_cover_llm_for_long_page():
+    leading_text = "内部说明：本页包含业务正文，不是封面。"
+    long_body = "履约说明" * 160
+    markdown_text = f"{leading_text}\n\n# 执行说明\n\n{long_body}\n"
+    payload = make_payload(
+        1,
+        [
+            {"type": "paragraph", "page number": 1, "content": leading_text},
+            {"type": "heading", "page number": 1, "content": "执行说明"},
+            {"type": "paragraph", "page number": 1, "content": long_body},
+        ],
+    )
+
+    def fail_if_called(model, prompt):
+        raise AssertionError("Long first pages must not invoke cover classification.")
+
+    result = build_hybrid_tree_pipeline(
+        markdown_text,
+        payload,
+        llm_fn=lambda model, prompt, chat_history=None: json.dumps(
+            [{"node_id": "001", "corrected_level": 1, "decision_reason": "Section."}]
+        ),
+        cover_classifier_fn=fail_if_called,
+    )
+
+    assert result["tree"][0]["title"] == "首页前导信息"
+    assert result["tree"][0]["text"] == leading_text
+    assert result["tree"][1]["title"] == "执行说明"
+
+
+def test_build_hybrid_tree_pipeline_creates_first_page_node_without_any_heading():
+    first_page_text = "买方合同编号：BUY-001\n卖方合同编号：SELL-002"
+    payload = make_payload(1, [{"type": "paragraph", "page number": 1, "content": first_page_text}])
+
+    result = build_hybrid_tree_pipeline(
+        first_page_text,
+        payload,
+        cover_classifier_fn=lambda model, prompt: '{"is_contract_cover": false}',
+    )
+
+    assert result["flat_nodes"] == []
+    assert result["tree"] == [
+        {
+            "node_id": "front_page_00",
+            "title": "首页前导信息",
+            "start_index": 1,
+            "end_index": 1,
+            "text": first_page_text,
+            "nodes": [],
+        }
+    ]
+
+
 def test_add_preface_node_if_needed_handles_empty_list():
     assert add_preface_node_if_needed([]) == []
 

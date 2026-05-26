@@ -51,7 +51,7 @@
 
 ### 2. 增加 Word 文档自动转换与建树支持
 
-当前服务层已经支持 `.doc` / `.docx` 文档接入。处理流程为：
+当前服务层与 API 上传入口都已经支持 `.doc` / `.docx` 文档接入。处理流程为：
 
 - 先识别输入文件后缀
 - 如果是 Word 文档，则先自动转换为 PDF
@@ -62,7 +62,7 @@
 - Windows：通过 `pywin32` 调用本机 Microsoft Word 转 PDF
 - Linux：通过 `libreoffice --headless` 转 PDF
 
-这意味着当前仓库已经从“仅面向 PDF”扩展到“面向 PDF + Word 文档”的服务层输入能力。
+这意味着当前仓库已经从“仅面向 PDF”扩展到“面向 PDF + Word 文档”的接口与服务层输入能力。
 
 ### 3. 引入基于 workspace 的缓存与稳定标识
 
@@ -229,9 +229,11 @@ print(result["doc_id"], result["tree_id"], result["source_file"])
 说明：
 
 - 返回的 `source_file` 会指向最终用于建树的 PDF 文件
+- `output_dir` 会同时作为 Word 转 PDF 的输出目录，以及混合建树调试/中间产物目录
 - Windows 需要安装 Microsoft Word
 - Linux 需要安装 LibreOffice
-- 当前 CLI 仍主要按 `--pdf_path` / `--md_path` 暴露入口，Word 自动转换能力主要体现在服务层与二次集成调用中
+- 当前 CLI 仍主要按 `--pdf_path` / `--md_path` 暴露入口
+- 如果通过 HTTP 集成，当前 API 也已经支持直接上传 `.doc/.docx`
 
 ### 3. Markdown 建树
 
@@ -350,6 +352,7 @@ uvicorn api:app --reload
 - 当前 API 上传接口 `POST /api/v1/upload_and_build` 已支持 `.pdf/.doc/.docx`
 - 当通过 API 上传 `.doc/.docx` 时，服务端会在后台先自动转换为 PDF，再继续建树
 - API 返回的建树结果中，`source_file` 指向实际用于索引的文件；对 Word 输入来说，这通常是转换后的 PDF 路径
+- 建树任务的 `output_dir` 既保存日志，也可能保存 Word 转换后的 PDF 和混合链路中间产物
 
 另外，当前接口统一采用标准响应结构：
 
@@ -420,6 +423,7 @@ curl -X POST "http://127.0.0.1:8000/api/v1/upload_and_build" ^
 
 - 如果上传的是 PDF，`source_file` 通常就是原始 PDF 路径
 - 如果上传的是 `.doc/.docx`，`source_file` 通常会是转换后的 PDF 路径
+- `output_dir` 对应任务隔离目录下的输出路径，可用于查看日志、转换产物和抽取结果
 
 ### 3. 第二步：基于 `doc_id` 发起动态 schema 抽取
 
@@ -617,6 +621,12 @@ CLI 默认输出一个 `*_structure.json` 文件，常见字段包括：
 - `build_document_tree_completed`
 
 如果输入源来自 API 上传的 `.doc/.docx`，整体流程与服务层一致：先落盘原始 Word 文件，再在后台转换为 PDF，最后对转换后的 PDF 建树。
+
+当前 `output_dir` 下常见可见内容包括：
+
+- `logs/`：建树与转换日志
+- 转换后的 PDF 文件（如果输入是 `.doc/.docx`）
+- 混合链路的中间产物目录，例如 `_hybrid_sources/`
 
 ### 2. 结构化抽取输出
 

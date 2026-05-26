@@ -7,7 +7,7 @@ import re
 import unicodedata
 from collections import defaultdict
 
-from .llm import count_tokens
+from .llm import count_tokens, extract_json, llm_completion
 from .tree_utils import (
     create_clean_structure_for_description,
     format_structure,
@@ -28,6 +28,9 @@ FALLBACK_HEADING_LEVELS = {
     "subheading": 4,
 }
 DEBUG_LOG_DIR = "logs"
+CONTRACT_COVER_TITLE = "合同封面"
+FIRST_PAGE_LEADING_TITLE = "首页前导信息"
+FIRST_PAGE_COVER_MAX_CHAR_COUNT = 500
 
 
 def _make_json_serializable(data):
@@ -158,6 +161,82 @@ def build_pdf_page_text_map(payload):
 
     collect_text(payload.get("kids", []))
     return {page: "\n".join(chunks) for page, chunks in sorted(page_chunks.items())}
+
+
+def extract_first_page_leading_text(markdown_text, first_heading=None, first_page_text=""):
+    if first_heading is None:
+        return str(first_page_text or "").strip()
+
+    page_number = first_heading.get("page_number", first_heading.get("physical_index"))
+    line_num = first_heading.get("line_num")
+    if page_number != 1 or not isinstance(line_num, int) or line_num < 1:
+        return ""
+
+    return "\n".join(markdown_text.splitlines()[: line_num - 1]).strip()
+
+
+def classify_first_page_as_contract_cover(
+    leading_text,
+    first_heading_title,
+    first_page_text,
+    model=None,
+    llm_fn=None,
+):
+    compact_page_text = re.sub(r"\s+", "", str(first_page_text or ""))
+    if not compact_page_text or len(compact_page_text) > FIRST_PAGE_COVER_MAX_CHAR_COUNT:
+        return False
+
+    prompt = f"""
+请判断文档物理第 1 页是否属于合同封面。
+
+判断要求：
+- 只有主要承载合同名称、合同编号、双方名称、签订日期/地点等封面信息，正文条款很少或没有时，才判断为合同封面。
+- 如果第 1 页包含大量条款正文、目录正文或普通业务内容，则判断为非封面。
+- 严格返回 JSON：{{"is_contract_cover": true}} 或 {{"is_contract_cover": false}}。
+
+第一个标题前的文本：
+{leading_text}
+
+第一个标题：
+{first_heading_title}
+
+第 1 页完整文本：
+{first_page_text}
+""".strip()
+    classifier = llm_fn or llm_completion
+    try:
+        response = classifier(model=model, prompt=prompt)
+    except TypeError:
+        response = classifier(model, prompt)
+    parsed = extract_json(str(response or ""))
+    return bool(parsed.get("is_contract_cover")) if isinstance(parsed, dict) else False
+
+
+def build_first_page_leading_node(markdown_text, page_text_map, first_heading=None, model=None, llm_fn=None):
+    first_page_text = str(page_text_map.get(1, "") or "").strip()
+    leading_text = extract_first_page_leading_text(
+        markdown_text,
+        first_heading=first_heading,
+        first_page_text=first_page_text,
+    )
+    if not leading_text:
+        return None
+
+    first_heading_title = str((first_heading or {}).get("title", "") or "").strip()
+    is_contract_cover = classify_first_page_as_contract_cover(
+        leading_text=leading_text,
+        first_heading_title=first_heading_title,
+        first_page_text=first_page_text,
+        model=model,
+        llm_fn=llm_fn,
+    )
+    return {
+        "title": CONTRACT_COVER_TITLE if is_contract_cover else FIRST_PAGE_LEADING_TITLE,
+        "start_page": 1,
+        "end_page": 1,
+        "text": leading_text,
+        "nodes": [],
+    }
 
 
 def extract_headings_from_pdf_json(payload):
@@ -612,8 +691,21 @@ def build_tree_from_hybrid_headings(headings, segment_end_page, page_text_map):
     return root_nodes
 
 
-def build_hybrid_structure(content_headings, toc_analysis, total_pages, page_text_map, doc_name, full_markdown_text):
+def build_hybrid_structure(
+    content_headings,
+    toc_analysis,
+    total_pages,
+    page_text_map,
+    doc_name,
+    full_markdown_text,
+    first_page_leading_node=None,
+):
     if not content_headings:
+        if first_page_leading_node is not None:
+            structure = [first_page_leading_node]
+            if total_pages > 1:
+                structure.append(make_orphan_node(2, total_pages, page_text_map))
+            return structure
         return [
             {
                 "title": doc_name,
@@ -650,6 +742,9 @@ def build_hybrid_structure(content_headings, toc_analysis, total_pages, page_tex
 
     if current_page <= total_pages:
         structure.append(make_orphan_node(current_page, total_pages, page_text_map))
+
+    if first_page_leading_node is not None:
+        structure.insert(0, first_page_leading_node)
 
     return structure
 
@@ -996,6 +1091,7 @@ async def md_to_tree_hybrid(
     if_add_node_text='no',
     if_add_node_id='yes',
     summary_max_concurrency=None,
+    cover_classifier_fn=None,
 ):
     del if_thinning
     del min_token_threshold
@@ -1027,6 +1123,13 @@ async def md_to_tree_hybrid(
     print("Analyzing table of contents coverage...")
     toc_analysis = extract_toc_analysis(hybrid_headings, page_text_map)
     content_headings = toc_analysis["content_headings"]
+    first_page_leading_node = build_first_page_leading_node(
+        markdown_content,
+        page_text_map,
+        first_heading=hybrid_headings[0] if hybrid_headings else None,
+        model=model,
+        llm_fn=cover_classifier_fn,
+    )
 
     print("Building hybrid tree structure...")
     tree_structure = build_hybrid_structure(
@@ -1036,6 +1139,7 @@ async def md_to_tree_hybrid(
         page_text_map=page_text_map,
         doc_name=doc_name,
         full_markdown_text=markdown_content,
+        first_page_leading_node=first_page_leading_node,
     )
 
     if if_add_node_id == 'yes':

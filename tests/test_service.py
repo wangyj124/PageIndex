@@ -203,6 +203,57 @@ def test_extract_dynamic_schema_persists_result_and_forwards_progress(monkeypatc
     assert captured["progress_calls"] == [(1, 1)]
 
 
+def test_extract_dynamic_schema_forwards_json_schema_field_instruction(monkeypatch, tmp_path):
+    captured = {}
+    json_schema = {
+        "type": "object",
+        "properties": {
+            "param1": {
+                "type": "string",
+                "description": "合同价格 合同总价",
+                "instruction": "优先提取含税总价",
+            }
+        },
+        "required": ["param1"],
+    }
+
+    class DummyClient:
+        def __init__(self, workspace):
+            self.workspace = workspace
+
+        def get_tree_id(self, doc_id):
+            return "tree-demo"
+
+    def fake_extract(client, doc_id, input_schema, max_concurrency=8, progress_callback=None):
+        captured["extract_schema"] = input_schema
+        return {
+            "param1": {
+                "status": "found",
+                "value": "500万元",
+                "evidence": "含税合同总价为人民币500万元。",
+                "pages": [4],
+                "confidence": "High",
+                "reason": None,
+            }
+        }
+
+    monkeypatch.setattr(service, "PageIndexClient", DummyClient)
+    monkeypatch.setattr(service, "extract_contract_fields", fake_extract)
+
+    service.extract_dynamic_schema(
+        doc_id="doc-demo",
+        schema=json_schema,
+        output_dir=str(tmp_path / "output"),
+        workspace_dir=str(tmp_path / "workspace"),
+    )
+
+    field = captured["extract_schema"]["fields"][0]
+    assert field["name"] == "param1"
+    assert field["description"] == "合同价格 合同总价"
+    assert field["required"] is True
+    assert field["instruction"] == "优先提取含税总价"
+
+
 def test_extract_dynamic_schema_injects_evidence_and_reformats_output(monkeypatch, tmp_path):
     output_dir = tmp_path / "output"
     workspace_dir = tmp_path / "workspace"
@@ -213,6 +264,7 @@ def test_extract_dynamic_schema_injects_evidence_and_reformats_output(monkeypatc
             "amount": {
                 "type": "string",
                 "description": "合同金额",
+                "instruction": "优先提取含税总价",
             }
         },
         "required": ["amount"],
@@ -265,6 +317,7 @@ def test_extract_dynamic_schema_injects_evidence_and_reformats_output(monkeypatc
     payload = json.loads(Path(result["output_path"]).read_text(encoding="utf-8"))
 
     assert captured["extract_schema"]["fields"][0]["name"] == "amount"
+    assert "优先提取含税总价" in captured["extract_schema"]["fields"][0]["instruction"]
     assert "value、page_number、section_title、original_quote" in captured["extract_schema"]["fields"][0]["instruction"]
     assert payload["require_evidence"] is True
     assert payload["extraction_result"]["amount"]["value"] == "500万"

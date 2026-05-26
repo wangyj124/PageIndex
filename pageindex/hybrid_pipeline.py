@@ -3,6 +3,7 @@ import logging
 from .markdown import (
     DEBUG_LOG_DIR,
     build_pdf_page_text_map,
+    build_first_page_leading_node,
     build_hybrid_headings_from_markdown_and_json,
     dump_debug_json,
     emit_debug_log,
@@ -181,6 +182,7 @@ def build_hybrid_tree_pipeline(
     logger=None,
     progress_callback=None,
     debug_dir=DEBUG_LOG_DIR,
+    cover_classifier_fn=None,
 ):
     logger = logger or logging.getLogger(__name__)
     derived_total_pages = total_pages or pdf_json_payload.get("number of pages") or 0
@@ -197,13 +199,33 @@ def build_hybrid_tree_pipeline(
         logger=logger,
         debug_dir=debug_dir,
     )
+    page_text_map = build_pdf_page_text_map(pdf_json_payload)
+    first_page_leading_node = build_first_page_leading_node(
+        markdown_text,
+        page_text_map,
+        first_heading=flat_nodes[0] if flat_nodes else None,
+        model=model,
+        llm_fn=cover_classifier_fn or llm_fn,
+    )
     if not flat_nodes:
+        tree = []
+        if first_page_leading_node is not None:
+            tree.append(
+                {
+                    "node_id": "front_page_00",
+                    "title": first_page_leading_node["title"],
+                    "start_index": 1,
+                    "end_index": 1,
+                    "text": first_page_leading_node["text"],
+                    "nodes": [],
+                }
+            )
         dump_debug_json(f"{debug_dir}/debug_03_reconstructed_nodes.json", [], logger=logger)
-        dump_debug_json(f"{debug_dir}/debug_04_initial_tree.json", [], logger=logger)
+        dump_debug_json(f"{debug_dir}/debug_04_initial_tree.json", tree, logger=logger)
         return {
             "flat_nodes": [],
             "reconstructed_nodes": [],
-            "tree": [],
+            "tree": tree,
             "total_pages": derived_total_pages,
         }
 
@@ -257,6 +279,18 @@ def build_hybrid_tree_pipeline(
     emit_debug_log(logger, "Building final tree and intervals")
     tree = build_tree_and_intervals(reconstructed_nodes, total_pages=derived_total_pages)
     tree = attach_tree_metadata(tree, reconstructed_nodes)
+    if first_page_leading_node is not None:
+        tree.insert(
+            0,
+            {
+                "node_id": "front_page_00",
+                "title": first_page_leading_node["title"],
+                "start_index": 1,
+                "end_index": 1,
+                "text": first_page_leading_node["text"],
+                "nodes": [],
+            },
+        )
     top_level_titles = [node.get("title", "") for node in tree]
     logger.info("Initial hybrid tree: top_level_count=%s, top_level_titles=%s", len(tree), top_level_titles)
     emit_debug_log(
