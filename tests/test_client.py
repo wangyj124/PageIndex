@@ -4,6 +4,7 @@ import uuid
 from pathlib import Path
 
 from pageindex.client import PageIndexClient
+from pageindex.contract_extraction import extract_contract_fields
 from pageindex.identity import build_doc_id, build_tree_id, compute_file_sha256
 from pageindex.logging_utils import JsonLogger, emit_progress_event
 
@@ -113,6 +114,13 @@ def test_client_hybrid_index_emits_progress_and_persists_workspace(monkeypatch):
         assert page_content == [{"page": 2, "content": "page two text"}]
         assert document["tree_id"] == expected_tree_id
         assert reloaded_client.get_tree_id(doc_id) == expected_tree_id
+        retrieval_payload = reloaded_client.get_retrieval_payload(doc_id)
+        assert retrieval_payload["type"] == "pdf"
+        assert retrieval_payload["pages"][1] == {"page": 2, "content": "page two text"}
+        assert retrieval_payload["structure"][0]["title"] == "Root"
+        long_context_payload = reloaded_client.get_long_context_payload(doc_id)
+        assert long_context_payload["pages"][1] == {"page": 2, "content": "page two text"}
+        assert "structure" not in long_context_payload
     finally:
         shutil.rmtree(temp_dir, ignore_errors=True)
 
@@ -205,6 +213,7 @@ def test_client_reuses_same_doc_id_for_same_pdf_bytes_across_paths(monkeypatch):
 
         client = PageIndexClient(workspace=workspace)
         first_doc_id = client.index(str(pdf_path_a), strategy="hybrid")
+        (workspace / "_pages" / f"{first_doc_id}.json").unlink()
         second_doc_id = client.index(str(pdf_path_b), strategy="hybrid")
 
         assert first_doc_id == second_doc_id == build_doc_id(compute_file_sha256(pdf_path_a))
@@ -214,6 +223,74 @@ def test_client_reuses_same_doc_id_for_same_pdf_bytes_across_paths(monkeypatch):
         reloaded_doc = json.loads(reloaded_client.get_document(first_doc_id))
         assert reloaded_doc["doc_id"] == first_doc_id
         assert reloaded_doc["tree_id"].startswith("tree_")
+        assert reloaded_client.get_long_context_payload(first_doc_id)["pages"] == [{"page": 1, "content": "page one"}]
+    finally:
+        shutil.rmtree(temp_dir, ignore_errors=True)
+
+
+def test_client_standard_pdf_index_persists_long_context_pages(monkeypatch):
+    temp_dir = make_temp_dir()
+    try:
+        workspace = temp_dir / "workspace"
+        pdf_path = temp_dir / "standard.pdf"
+        pdf_path.write_bytes(b"%PDF-1.4\n%stub\n")
+        monkeypatch.setattr(
+            "pageindex.client.page_index",
+            lambda **kwargs: {"doc_name": "standard", "doc_description": "", "structure": []},
+        )
+        monkeypatch.setattr(
+            PageIndexClient,
+            "_extract_pdf_pages",
+            staticmethod(lambda file_path: [{"page": 1, "content": "standard text"}]),
+        )
+
+        client = PageIndexClient(workspace=workspace)
+        doc_id = client.index(str(pdf_path), strategy="standard")
+
+        assert client.get_long_context_payload(doc_id)["pages"] == [{"page": 1, "content": "standard text"}]
+    finally:
+        shutil.rmtree(temp_dir, ignore_errors=True)
+
+
+def test_client_without_workspace_exposes_in_memory_long_context_pages(monkeypatch):
+    temp_dir = make_temp_dir()
+    try:
+        pdf_path = temp_dir / "memory.pdf"
+        pdf_path.write_bytes(b"%PDF-1.4\n%stub\n")
+        monkeypatch.setattr(
+            "pageindex.client.page_index",
+            lambda **kwargs: {"doc_name": "memory", "doc_description": "", "structure": []},
+        )
+        monkeypatch.setattr(
+            PageIndexClient,
+            "_extract_pdf_pages",
+            staticmethod(lambda file_path: [{"page": 1, "content": "in-memory full text"}]),
+        )
+        models = []
+
+        async def fake_llm_acompletion(model, prompt):
+            models.append(model)
+            assert "in-memory full text" in prompt
+            return '{"status":"found","value":"内存值","evidence":"in-memory full text","pages":[1],"confidence":"High","reason":null}'
+
+        monkeypatch.setattr("pageindex.contract_extraction.llm_acompletion", fake_llm_acompletion)
+
+        client = PageIndexClient(long_context_model="openai/memory-long-model")
+        doc_id = client.index(str(pdf_path), strategy="standard")
+
+        assert client.get_long_context_payload(doc_id) == {
+            "doc_id": doc_id,
+            "page_count": 1,
+            "pages": [{"page": 1, "content": "in-memory full text"}],
+        }
+        result = extract_contract_fields(
+            client,
+            doc_id,
+            {"fields": [{"name": "memory_value", "description": "内存字段"}]},
+            long_context_mode=True,
+        )
+        assert result["memory_value"]["value"] == "内存值"
+        assert models == ["openai/memory-long-model"]
     finally:
         shutil.rmtree(temp_dir, ignore_errors=True)
 

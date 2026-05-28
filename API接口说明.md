@@ -173,7 +173,8 @@ curl -X POST "http://10.67.75.27:8000/api/v1/upload_and_build" ^
       }
     }
   },
-  "require_evidence": true
+  "require_evidence": true,
+  "long_context_mode": true
 }
 ```
 
@@ -182,6 +183,7 @@ curl -X POST "http://10.67.75.27:8000/api/v1/upload_and_build" ^
 - `doc_id`：必填，建树成功后返回的文档 ID
 - `schema_def`：必填，动态抽取 schema
 - `require_evidence`：可选，默认 `false`
+- `long_context_mode`：可选布尔值，默认 `false`；为 `true` 时直接使用完整分页原文抽取
 
 ### 5.3 schema_def 支持格式
 
@@ -224,8 +226,8 @@ curl -X POST "http://10.67.75.27:8000/api/v1/upload_and_build" ^
 当 `require_evidence=false` 时，抽取结果更接近内部字段抽取结构，通常包含：
 
 - `status`
-- `value`
-- `evidence`
+- `value`：命中字段所在的完整合同条款原文；如果多个条款共同支持结果，按条款逐条返回
+- `evidence`：支撑判断的核心原文片段，可使用省略号压缩上下文
 - `pages`
 - `confidence`
 - `reason`
@@ -235,10 +237,14 @@ curl -X POST "http://10.67.75.27:8000/api/v1/upload_and_build" ^
 - `value`
 - `page_number`
 - `section_title`
-- `original_quote`
+- `original_quote`：核心原文片段，可使用省略号压缩上下文，不返回完整条款全文
 - `status`
 - `confidence`
 - `reason`
+
+当 `long_context_mode=true` 时，服务端仅从建树阶段生成的独立分页原文产物读取全文，并绕过树摘要和检索链路；缺少该产物的历史文档需要重新上传并完成建树。若同时启用 `require_evidence`，`section_title` 固定返回空字符串。
+
+长上下文调用使用服务端 `pageindex/config.yaml` 中的 `long_context_model`，部署时应将其配置为可容纳完整文档上下文的模型。
 
 ### 5.5 curl 示例
 
@@ -246,7 +252,7 @@ curl -X POST "http://10.67.75.27:8000/api/v1/upload_and_build" ^
 curl -X POST "http://10.67.75.27:8000/api/v1/extract" ^
   -H "accept: application/json" ^
   -H "Content-Type: application/json" ^
-  -d "{\"doc_id\":\"doc-build-demo\",\"schema_def\":{\"type\":\"object\",\"properties\":{\"party_a\":{\"type\":\"string\",\"description\":\"甲方\"},\"party_b\":{\"type\":\"string\",\"description\":\"乙方\"}}},\"require_evidence\":true}"
+  -d "{\"doc_id\":\"doc-build-demo\",\"schema_def\":{\"type\":\"object\",\"properties\":{\"party_a\":{\"type\":\"string\",\"description\":\"甲方\"},\"party_b\":{\"type\":\"string\",\"description\":\"乙方\"}}},\"require_evidence\":true,\"long_context_mode\":true}"
 ```
 
 ### 5.6 成功返回示例
@@ -352,6 +358,7 @@ curl "http://10.67.75.27:8000/api/v1/task/b7c2f5c5f1f6496f9858a2dbe4b9b4e0"
 - `output_dir`
 - `result_status`
 - `require_evidence`
+- `long_context_mode`
 - `extracted_count`
 - `total_count`
 - `completed_at`
@@ -376,6 +383,7 @@ curl "http://10.67.75.27:8000/api/v1/task/b7c2f5c5f1f6496f9858a2dbe4b9b4e0"
 - `doc_id`
 - `tree_id`
 - `require_evidence`
+- `long_context_mode`
 - `extraction_result`
 
 注意：

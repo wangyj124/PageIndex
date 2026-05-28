@@ -138,6 +138,7 @@ def test_extract_runs_background_task_with_progress_and_evidence_flag(monkeypatc
         max_concurrency=4,
         progress_callback=None,
         require_evidence=False,
+        long_context_mode=False,
     ):
         captured["doc_id"] = doc_id
         captured["schema"] = schema
@@ -145,6 +146,7 @@ def test_extract_runs_background_task_with_progress_and_evidence_flag(monkeypatc
         captured["workspace_dir"] = workspace_dir
         captured["max_concurrency"] = max_concurrency
         captured["require_evidence"] = require_evidence
+        captured["long_context_mode"] = long_context_mode
         if progress_callback is not None:
             progress_callback(1, 2)
             progress_callback(2, 2)
@@ -182,6 +184,7 @@ def test_extract_runs_background_task_with_progress_and_evidence_flag(monkeypatc
                     },
                 },
                 "require_evidence": True,
+                "long_context_mode": True,
             },
         )
 
@@ -204,6 +207,8 @@ def test_extract_runs_background_task_with_progress_and_evidence_flag(monkeypatc
         assert captured["workspace_dir"] == str(api.API_SHARED_WORKSPACE)
         assert captured["output_dir"] == str(task_dir / "output")
         assert captured["require_evidence"] is True
+        assert captured["long_context_mode"] is True
+        assert task_info["long_context_mode"] is True
         assert task_info["output_path"].endswith("doc-extract-demo_extraction.json")
 
         query_response = client.get(f"/api/v1/task/{task_id}")
@@ -298,6 +303,7 @@ def test_extraction_task_marks_failed_task(monkeypatch):
         query_response = client.get(f"/api/v1/task/{task_id}")
         assert query_response.status_code == 200
         assert query_response.json()["data"]["status"] == "failed"
+        assert query_response.json()["data"]["long_context_mode"] is False
         assert "mock extraction failure" in query_response.json()["data"]["error"]
 
 
@@ -359,6 +365,7 @@ def test_openapi_uses_realistic_swagger_examples():
     assert extraction_request_example["doc_id"] == "doc_1079388f5212c5d90f705bac4a6ad9612ff5d6cfa284802084d2ddb7d8544fab"
     assert extraction_request_example["schema_def"]["properties"]["party_a"]["description"] == "甲方"
     assert extraction_request_example["require_evidence"] is True
+    assert extraction_request_example["long_context_mode"] is True
 
     extraction_response_example = schema["paths"]["/api/v1/extract"]["post"]["responses"]["200"]["content"][
         "application/json"
@@ -369,5 +376,6 @@ def test_openapi_uses_realistic_swagger_examples():
         "application/json"
     ]["examples"]
     assert task_examples["extraction_task"]["value"]["data"]["task_type"] == "extraction"
+    assert task_examples["extraction_task"]["value"]["data"]["long_context_mode"] is True
     assert "party_a" in task_examples["extraction_task"]["value"]["data"]["extraction_result"]
     assert task_examples["build_tree_task"]["value"]["data"]["task_type"] == "build_tree"

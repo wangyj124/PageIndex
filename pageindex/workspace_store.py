@@ -5,6 +5,7 @@ from pathlib import Path
 from .tree_utils import remove_fields
 
 META_INDEX = "_meta.json"
+PAGE_CONTENT_DIR = "_pages"
 
 
 class WorkspaceStore:
@@ -71,6 +72,17 @@ class WorkspaceStore:
             json.dump(payload, f, ensure_ascii=False, indent=2)
         self.save_meta(doc_id, self.make_meta_entry(payload))
 
+    def save_page_payload(self, doc_id, pages):
+        page_dir = self.workspace / PAGE_CONTENT_DIR
+        page_dir.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "doc_id": doc_id,
+            "page_count": len(pages),
+            "pages": list(pages),
+        }
+        with open(page_dir / f"{doc_id}.json", "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False, indent=2)
+
     def load_documents(self):
         meta = self.read_meta()
         if meta is None:
@@ -88,5 +100,8 @@ class WorkspaceStore:
     def load_doc_payload(self, doc_id):
         return self._read_json(self.workspace / f"{doc_id}.json")
 
+    def load_page_payload(self, doc_id):
+        return self._read_json(self.workspace / PAGE_CONTENT_DIR / f"{doc_id}.json")
 
-__all__ = ["META_INDEX", "WorkspaceStore"]
+
+__all__ = ["META_INDEX", "PAGE_CONTENT_DIR", "WorkspaceStore"]

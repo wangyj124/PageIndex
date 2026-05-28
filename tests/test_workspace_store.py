@@ -2,9 +2,7 @@ import shutil
 import uuid
 from pathlib import Path
 
-import pytest
-
-from pageindex.workspace_store import WorkspaceStore
+from pageindex.workspace_store import PAGE_CONTENT_DIR, WorkspaceStore
 
 
 def make_temp_dir():
@@ -60,6 +58,25 @@ def test_workspace_store_load_payload():
         shutil.rmtree(temp_dir, ignore_errors=True)
 
 
+def test_workspace_store_saves_dedicated_page_payload_without_structure():
+    temp_dir = make_temp_dir()
+    try:
+        store = WorkspaceStore(temp_dir)
+        store.save_page_payload("doc-pages", [{"page": 1, "content": "全文第一页"}])
+
+        payload = store.load_page_payload("doc-pages")
+
+        assert payload == {
+            "doc_id": "doc-pages",
+            "page_count": 1,
+            "pages": [{"page": 1, "content": "全文第一页"}],
+        }
+        assert "structure" not in payload
+        assert (temp_dir / PAGE_CONTENT_DIR / "doc-pages.json").is_file()
+    finally:
+        shutil.rmtree(temp_dir, ignore_errors=True)
+
+
 def test_workspace_store_missing_meta_is_silent(capsys):
     temp_dir = make_temp_dir()
     try:
@@ -67,5 +84,18 @@ def test_workspace_store_missing_meta_is_silent(capsys):
 
         assert store.read_meta() is None
         assert capsys.readouterr().out == ""
+    finally:
+        shutil.rmtree(temp_dir, ignore_errors=True)
+
+
+def test_workspace_store_does_not_rebuild_retrieval_cache_as_document():
+    temp_dir = make_temp_dir()
+    try:
+        store = WorkspaceStore(temp_dir)
+        cache_dir = temp_dir / "_retrieval" / "vector"
+        cache_dir.mkdir(parents=True)
+        (cache_dir / "index.json").write_text('{"chunks": []}', encoding="utf-8")
+
+        assert store.rebuild_meta() == {}
     finally:
         shutil.rmtree(temp_dir, ignore_errors=True)

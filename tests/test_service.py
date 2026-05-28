@@ -155,10 +155,20 @@ def test_extract_dynamic_schema_persists_result_and_forwards_progress(monkeypatc
             captured["tree_doc_id"] = doc_id
             return "tree-demo"
 
-    def fake_extract(client, doc_id, input_schema, max_concurrency=8, progress_callback=None):
+    def fake_extract(
+        client,
+        doc_id,
+        input_schema,
+        max_concurrency=8,
+        progress_callback=None,
+        retrieval_logger=None,
+        long_context_mode=False,
+    ):
         captured["extract_doc_id"] = doc_id
         captured["extract_schema"] = input_schema
         captured["max_concurrency"] = max_concurrency
+        captured["retrieval_logger"] = retrieval_logger
+        captured["long_context_mode"] = long_context_mode
         if progress_callback is not None:
             progress_callback(1, 1)
         return {
@@ -200,7 +210,11 @@ def test_extract_dynamic_schema_persists_result_and_forwards_progress(monkeypatc
     assert captured["extract_doc_id"] == "doc-demo"
     assert captured["extract_schema"] == schema
     assert captured["max_concurrency"] == 4
+    assert captured["long_context_mode"] is False
     assert captured["progress_calls"] == [(1, 1)]
+    assert Path(payload["extraction_log_path"]).is_file()
+    log_payload = json.loads(Path(payload["extraction_log_path"]).read_text(encoding="utf-8"))
+    assert [entry["event"] for entry in log_payload] == ["dynamic_extraction_started", "dynamic_extraction_completed"]
 
 
 def test_extract_dynamic_schema_forwards_json_schema_field_instruction(monkeypatch, tmp_path):
@@ -224,7 +238,15 @@ def test_extract_dynamic_schema_forwards_json_schema_field_instruction(monkeypat
         def get_tree_id(self, doc_id):
             return "tree-demo"
 
-    def fake_extract(client, doc_id, input_schema, max_concurrency=8, progress_callback=None):
+    def fake_extract(
+        client,
+        doc_id,
+        input_schema,
+        max_concurrency=8,
+        progress_callback=None,
+        retrieval_logger=None,
+        long_context_mode=False,
+    ):
         captured["extract_schema"] = input_schema
         return {
             "param1": {
@@ -290,8 +312,20 @@ def test_extract_dynamic_schema_injects_evidence_and_reformats_output(monkeypatc
                 ensure_ascii=False,
             )
 
-    def fake_extract(client, doc_id, input_schema, max_concurrency=8, progress_callback=None):
+    def fake_extract(
+        client,
+        doc_id,
+        input_schema,
+        max_concurrency=8,
+        progress_callback=None,
+        include_retrieval_metadata=False,
+        retrieval_logger=None,
+        long_context_mode=False,
+    ):
         captured["extract_schema"] = input_schema
+        captured["include_retrieval_metadata"] = include_retrieval_metadata
+        captured["retrieval_logger"] = retrieval_logger
+        captured["long_context_mode"] = long_context_mode
         return {
             "amount": {
                 "status": "found",
@@ -300,6 +334,12 @@ def test_extract_dynamic_schema_injects_evidence_and_reformats_output(monkeypatc
                 "pages": [4],
                 "confidence": "High",
                 "reason": None,
+                "resolution_method": "reference_followup",
+                "retrieval_sources": ["reference_tree"],
+                "evidence_chain": [
+                    {"role": "reference_source", "page_number": [3], "original_quote": "详见付款条款。"},
+                    {"role": "value_source", "page_number": [4], "original_quote": "合同总价暂定为人民币500万元。"},
+                ],
             }
         }
 
@@ -317,13 +357,110 @@ def test_extract_dynamic_schema_injects_evidence_and_reformats_output(monkeypatc
     payload = json.loads(Path(result["output_path"]).read_text(encoding="utf-8"))
 
     assert captured["extract_schema"]["fields"][0]["name"] == "amount"
+    assert captured["include_retrieval_metadata"] is True
+    assert captured["retrieval_logger"] is not None
+    assert captured["long_context_mode"] is False
     assert "优先提取含税总价" in captured["extract_schema"]["fields"][0]["instruction"]
     assert "value、page_number、section_title、original_quote" in captured["extract_schema"]["fields"][0]["instruction"]
+    assert "完整合同条款原文" in captured["extract_schema"]["fields"][0]["instruction"]
+    assert "original_quote 只返回核心原文片段" in captured["extract_schema"]["fields"][0]["instruction"]
     assert payload["require_evidence"] is True
     assert payload["extraction_result"]["amount"]["value"] == "500万"
     assert payload["extraction_result"]["amount"]["page_number"] == [4]
     assert payload["extraction_result"]["amount"]["section_title"] == "价格条款"
     assert payload["extraction_result"]["amount"]["original_quote"] == "合同总价暂定为人民币500万元。"
+    assert payload["extraction_result"]["amount"]["resolution_method"] == "reference_followup"
+    assert payload["extraction_result"]["amount"]["retrieval_sources"] == ["reference_tree"]
+    assert payload["extraction_result"]["amount"]["evidence_chain"][0]["role"] == "reference_source"
+
+
+def test_extract_dynamic_schema_long_context_preserves_evidence_shape_without_reading_tree(monkeypatch, tmp_path):
+    captured = {}
+    json_schema = {
+        "type": "object",
+        "properties": {"amount": {"type": "string", "description": "合同金额"}},
+        "required": ["amount"],
+    }
+
+    class DummyClient:
+        def __init__(self, workspace):
+            self.workspace = workspace
+
+        def get_tree_id(self, doc_id):
+            return "tree-demo"
+
+        def get_long_context_payload(self, doc_id):
+            return {"doc_id": doc_id, "pages": [{"page": 4, "content": "合同总价为500万元。"}]}
+
+        def get_document_structure(self, doc_id):
+            raise AssertionError("long-context evidence must not load document structure")
+
+    def fake_extract(
+        client,
+        doc_id,
+        input_schema,
+        max_concurrency=8,
+        progress_callback=None,
+        include_retrieval_metadata=False,
+        retrieval_logger=None,
+        long_context_mode=False,
+    ):
+        captured["long_context_mode"] = long_context_mode
+        captured["include_retrieval_metadata"] = include_retrieval_metadata
+        return {
+            "amount": {
+                "status": "found",
+                "value": "500万元",
+                "evidence": "合同总价为500万元。",
+                "pages": [4],
+                "confidence": "High",
+                "reason": None,
+                "resolution_method": "long_context",
+                "retrieval_sources": ["full_document"],
+            }
+        }
+
+    monkeypatch.setattr(service, "PageIndexClient", DummyClient)
+    monkeypatch.setattr(service, "extract_contract_fields", fake_extract)
+
+    result = service.extract_dynamic_schema(
+        doc_id="doc-demo",
+        schema=json_schema,
+        output_dir=str(tmp_path / "output"),
+        workspace_dir=str(tmp_path / "workspace"),
+        require_evidence=True,
+        long_context_mode=True,
+    )
+    payload = json.loads(Path(result["output_path"]).read_text(encoding="utf-8"))
+
+    assert captured == {"long_context_mode": True, "include_retrieval_metadata": True}
+    assert payload["long_context_mode"] is True
+    assert payload["extraction_result"]["amount"]["section_title"] == ""
+    assert payload["extraction_result"]["amount"]["resolution_method"] == "long_context"
+    assert payload["extraction_result"]["amount"]["retrieval_sources"] == ["full_document"]
+
+
+def test_extract_dynamic_schema_long_context_requires_dedicated_page_payload(monkeypatch, tmp_path):
+    class DummyClient:
+        def __init__(self, workspace):
+            self.workspace = workspace
+
+        def get_tree_id(self, doc_id):
+            return "tree-demo"
+
+        def get_long_context_payload(self, doc_id):
+            return {}
+
+    monkeypatch.setattr(service, "PageIndexClient", DummyClient)
+
+    with pytest.raises(ValueError, match="重新上传并完成建树"):
+        service.extract_dynamic_schema(
+            doc_id="doc-legacy",
+            schema={"fields": [{"name": "amount", "description": "合同金额"}]},
+            output_dir=str(tmp_path / "output"),
+            workspace_dir=str(tmp_path / "workspace"),
+            long_context_mode=True,
+        )
 
 
 def test_extract_dynamic_schema_raises_when_doc_id_not_found(monkeypatch, tmp_path):
@@ -353,7 +490,15 @@ def test_extract_dynamic_schema_raises_when_result_fields_mismatch(monkeypatch, 
         def get_tree_id(self, doc_id):
             return "tree-demo"
 
-    def fake_extract(client, doc_id, input_schema, max_concurrency=8, progress_callback=None):
+    def fake_extract(
+        client,
+        doc_id,
+        input_schema,
+        max_concurrency=8,
+        progress_callback=None,
+        retrieval_logger=None,
+        long_context_mode=False,
+    ):
         return {
             "contract_total_price": {
                 "status": "found",

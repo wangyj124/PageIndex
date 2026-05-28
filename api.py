@@ -50,6 +50,7 @@ EXTRACTION_REQUEST_EXAMPLE = {
         },
     },
     "require_evidence": True,
+    "long_context_mode": True,
 }
 
 EXTRACTION_RESPONSE_EXAMPLE = {
@@ -80,6 +81,7 @@ EXTRACTION_TASK_QUERY_EXAMPLE = {
         "extracted_count": 2,
         "total_count": 2,
         "require_evidence": True,
+        "long_context_mode": True,
         "started_at": "2026-05-18T04:43:41Z",
         "output_dir": (
             "/home/sgc/PageIndex-MJ/artifacts/api_workspace/tasks/"
@@ -159,6 +161,7 @@ class ExtractionRequest(BaseModel):
     doc_id: str = Field(..., description="已完成建树的文档 ID")
     schema_def: dict[str, Any] = Field(..., description="动态抽取 schema 定义")
     require_evidence: bool = Field(default=False, description="是否启用带证据溯源的结果结构")
+    long_context_mode: bool = Field(default=False, description="是否使用独立分页原文执行长上下文抽取")
 
 
 def _utcnow_iso() -> str:
@@ -268,6 +271,7 @@ def _process_extraction_task(
     doc_id: str,
     schema: dict[str, Any],
     require_evidence: bool,
+    long_context_mode: bool,
     task_dir: str,
 ) -> None:
     """
@@ -300,6 +304,7 @@ def _process_extraction_task(
             workspace_dir=str(API_SHARED_WORKSPACE),
             progress_callback=progress_callback,
             require_evidence=require_evidence,
+            long_context_mode=long_context_mode,
         )
     except Exception as exc:
         _update_task(
@@ -445,6 +450,7 @@ async def extract_with_dynamic_schema(
         extracted_count=0,
         total_count=total_count,
         require_evidence=request.require_evidence,
+        long_context_mode=request.long_context_mode,
     )
 
     background_tasks.add_task(
@@ -453,6 +459,7 @@ async def extract_with_dynamic_schema(
         request.doc_id,
         request.schema_def,
         request.require_evidence,
+        request.long_context_mode,
         str(task_dir),
     )
 

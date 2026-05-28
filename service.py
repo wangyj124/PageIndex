@@ -66,7 +66,11 @@ def _normalize_to_extraction_schema(schema: dict[str, Any] | list[dict[str, Any]
                 field_type = value_schema.get("type", "string")
                 instruction = instruction or str(value_schema.get("instruction", "") or "").strip()
             evidence_instruction = "请基于原文同时给出 value、page_number、section_title、original_quote。"
-            instruction = "\n".join(filter(None, (instruction, evidence_instruction)))
+            clause_value_instruction = (
+                "其中 value 必须返回命中字段所在的完整合同条款原文；original_quote 只返回核心原文片段，"
+                "可使用省略号压缩上下文。"
+            )
+            instruction = "\n".join(filter(None, (instruction, evidence_instruction, clause_value_instruction)))
 
         fields.append(
             {
@@ -127,7 +131,7 @@ def _inject_evidence_to_schema(original_schema: dict[str, Any]) -> dict[str, Any
             "properties": {
                 "value": {
                     "type": value_type,
-                    "description": value_description,
+                    "description": f"{value_description}。返回完整合同条款原文，不要总结或只返回字段值。",
                 },
                 "page_number": {
                     "type": "array",
@@ -140,7 +144,7 @@ def _inject_evidence_to_schema(original_schema: dict[str, Any]) -> dict[str, Any
                 },
                 "original_quote": {
                     "type": "string",
-                    "description": "支撑该提取结果的原文摘录片段（10-50字）",
+                    "description": "支撑该提取结果的核心原文片段，可用省略号压缩上下文，不返回完整条款全文",
                 },
             },
             "required": ["value", "page_number", "section_title", "original_quote"],
@@ -178,14 +182,18 @@ def _find_section_title_by_page(structure: list[dict[str, Any]], page_number: in
 
 def _build_evidence_result(
     extraction_result: dict[str, Any],
-    structure: list[dict[str, Any]],
+    structure: list[dict[str, Any]] | None,
 ) -> dict[str, Any]:
     """将现有抽取结果重组为带 evidence 溯源信息的输出结构。"""
     evidence_result: dict[str, Any] = {}
     for field_name, payload in extraction_result.items():
         page_numbers = payload.get("pages") or []
         first_page = page_numbers[0] if page_numbers else None
-        section_title = _find_section_title_by_page(structure, first_page) if isinstance(first_page, int) else ""
+        section_title = (
+            _find_section_title_by_page(structure, first_page)
+            if structure is not None and isinstance(first_page, int)
+            else ""
+        )
 
         evidence_result[field_name] = {
             "value": payload.get("value", ""),
@@ -196,6 +204,9 @@ def _build_evidence_result(
             "confidence": payload.get("confidence"),
             "reason": payload.get("reason"),
         }
+        for metadata_field in ("resolution_method", "retrieval_sources", "evidence_chain", "fallback_status"):
+            if metadata_field in payload:
+                evidence_result[field_name][metadata_field] = payload[metadata_field]
     return evidence_result
 
 
@@ -219,7 +230,6 @@ def build_document_tree(
 
     output_path_dir = Path(output_dir).expanduser().resolve()
     output_path_dir.mkdir(parents=True, exist_ok=True)
-
     source_suffix = source_path.suffix.lower()
     if source_suffix not in SUPPORTED_DOCUMENT_SUFFIXES:
         raise ValueError(f"仅支持 .pdf、.doc、.docx 文件，当前文件为: {source_path.name}")
@@ -302,6 +312,7 @@ def extract_dynamic_schema(
     max_concurrency: int = 4,
     progress_callback: Callable[[int, int], None] | None = None,
     require_evidence: bool = False,
+    long_context_mode: bool = False,
 ) -> dict[str, str]:
     """
     基于已有 doc_id 和动态 schema 执行字段抽取。
@@ -316,26 +327,36 @@ def extract_dynamic_schema(
 
     output_path_dir = Path(output_dir).expanduser().resolve()
     output_path_dir.mkdir(parents=True, exist_ok=True)
+    extraction_logger = JsonLogger(f"{doc_id}_extraction.pdf", base_dir=str(output_path_dir / "logs"))
+    extraction_logger.info(
+        {"event": "dynamic_extraction_started", "doc_id": doc_id, "long_context_mode": long_context_mode}
+    )
 
     client = PageIndexClient(workspace=str(workspace_path))
     tree_id = client.get_tree_id(doc_id)
     if not tree_id:
         raise ValueError(f"未找到 doc_id 对应的文档树: {doc_id}")
+    if long_context_mode:
+        page_payload = client.get_long_context_payload(doc_id)
+        if not isinstance(page_payload.get("pages"), list) or not page_payload["pages"]:
+            raise ValueError("长上下文模式缺少独立分页原文产物，请重新上传并完成建树后重试")
 
     effective_schema = _inject_evidence_to_schema(schema) if require_evidence else schema
     extraction_schema = _normalize_to_extraction_schema(effective_schema)
-    extraction_result = extract_contract_fields(
-        client,
-        doc_id,
-        extraction_schema,
-        max_concurrency=max_concurrency,
-        progress_callback=progress_callback,
-    )
+    extraction_kwargs = {
+        "max_concurrency": max_concurrency,
+        "progress_callback": progress_callback,
+        "retrieval_logger": extraction_logger,
+        "long_context_mode": long_context_mode,
+    }
+    if require_evidence:
+        extraction_kwargs["include_retrieval_metadata"] = True
+    extraction_result = extract_contract_fields(client, doc_id, extraction_schema, **extraction_kwargs)
     _validate_extraction_result(extraction_schema, extraction_result)
 
     final_result = extraction_result
     if require_evidence:
-        structure = json.loads(client.get_document_structure(doc_id))
+        structure = None if long_context_mode else json.loads(client.get_document_structure(doc_id))
         final_result = _build_evidence_result(extraction_result, structure)
 
     payload = {
@@ -343,7 +364,9 @@ def extract_dynamic_schema(
         "doc_id": doc_id,
         "tree_id": tree_id,
         "require_evidence": require_evidence,
+        "long_context_mode": long_context_mode,
         "extraction_result": final_result,
+        "extraction_log_path": extraction_logger._filepath(),
     }
 
     result_path = output_path_dir / f"{doc_id}_extraction.json"
@@ -351,9 +374,21 @@ def extract_dynamic_schema(
         json.dumps(payload, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
+    extraction_logger.info(
+        {
+            "event": "dynamic_extraction_completed",
+            "doc_id": doc_id,
+            "long_context_mode": long_context_mode,
+            "result_path": str(result_path),
+            "field_statuses": {
+                field_name: result_payload.get("status") for field_name, result_payload in extraction_result.items()
+            },
+        }
+    )
 
     return {
         "status": "success",
         "output_path": str(result_path),
+        "extraction_log_path": extraction_logger._filepath(),
         "doc_id": doc_id,
     }

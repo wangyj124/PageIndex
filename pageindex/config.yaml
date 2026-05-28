@@ -1,6 +1,7 @@
 model: "openai/deepseek-v4-flash"
 # model: "anthropic/claude-sonnet-4-6"
 retrieve_model: "openai/deepseek-v4-flash"  # defaults to `model` if not set
+long_context_model: "openai/deepseek-v4-flash"  # configure a model with sufficient context for full-document extraction
 toc_check_page_num: 20
 max_page_num_each_node: 10
 max_token_num_each_node: 20000
@@ -9,3 +10,39 @@ if_add_node_summary: "yes"
 if_add_doc_description: "no"
 if_add_node_text: "no"
 summary_max_concurrency: 3
+
+# Contract field retrieval query generation
+retrieval_query_generation_enabled: true
+retrieval_primary_query_limit: 3
+retrieval_expanded_keyword_limit: 8
+retrieval_query_cache_enabled: true
+
+# Tree + BM25 retrieval
+tree_page_limit: 3
+bm25_primary_top_k: 10
+bm25_expanded_top_k: 20
+bm25_selected_page_limit: 6
+initial_candidate_page_limit: 9
+extract_batch_page_limit: 4
+initial_context_token_budget: 12000
+
+# BM25 fusion
+bm25_primary_rrf_weight: 3.0
+bm25_expanded_rrf_weight: 1.0
+bm25_rrf_constant: 60
+
+# Reference following
+max_reference_depth: 3
+max_reference_targets_per_step: 2
+reference_total_page_limit: 9
+
+# Vector fallback
+vector_enabled: true
+vector_fallback_max_runs: 1
+embedding_model: "openai/bge-m3:latest"
+vector_index_cache_enabled: true
+vector_chunk_tokens: 300
+vector_chunk_overlap_tokens: 50
+vector_chunk_top_k: 30
+vector_page_limit: 5
+vector_context_token_budget: 10000

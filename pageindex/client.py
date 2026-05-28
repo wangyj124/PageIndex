@@ -30,7 +30,14 @@ class PageIndexClient:
     Flow: index() -> get_document() / get_document_structure() / get_page_content()
     """
 
-    def __init__(self, api_key: str = None, model: str = None, retrieve_model: str = None, workspace: str = None):
+    def __init__(
+        self,
+        api_key: str = None,
+        model: str = None,
+        retrieve_model: str = None,
+        workspace: str = None,
+        long_context_model: str = None,
+    ):
         if api_key:
             os.environ["OPENAI_API_KEY"] = api_key
         elif not os.getenv("OPENAI_API_KEY") and os.getenv("CHATGPT_API_KEY"):
@@ -42,10 +49,14 @@ class PageIndexClient:
             overrides["model"] = model
         if retrieve_model:
             overrides["retrieve_model"] = retrieve_model
+        if long_context_model:
+            overrides["long_context_model"] = long_context_model
         opt = ConfigLoader().load(overrides or None)
         self.model = opt.model
         self.retrieve_model = _normalize_retrieve_model(opt.retrieve_model or self.model)
+        self.long_context_model = _normalize_retrieve_model(opt.long_context_model or self.retrieve_model)
         self.summary_max_concurrency = getattr(opt, "summary_max_concurrency", None)
+        self.retrieval_config = opt
         self.store = WorkspaceStore(self.workspace) if self.workspace else None
         self.documents = self.store.load_documents() if self.store else {}
 
@@ -95,6 +106,7 @@ class PageIndexClient:
             )
             if self.store:
                 self.store.save_meta(doc_id, self.store.make_meta_entry(cached_doc))
+                self._materialize_page_payload_from_cached_document(doc_id, cached_doc)
             return doc_id
 
         try:
@@ -372,9 +384,20 @@ class PageIndexClient:
         return pages
 
     def _save_doc(self, doc_id: str):
-        self.store.save_doc(doc_id, self.documents[doc_id])
+        doc = self.documents[doc_id]
+        self.store.save_doc(doc_id, doc)
+        if doc.get("type") == "pdf" and doc.get("pages"):
+            self.store.save_page_payload(doc_id, doc["pages"])
         self.documents[doc_id].pop("structure", None)
         self.documents[doc_id].pop("pages", None)
+
+    def _materialize_page_payload_from_cached_document(self, doc_id: str, doc: dict) -> None:
+        if doc.get("type") != "pdf" or self.store.load_page_payload(doc_id):
+            return
+        payload = self.store.load_doc_payload(doc_id) or {}
+        pages = payload.get("pages")
+        if isinstance(pages, list) and pages:
+            self.store.save_page_payload(doc_id, pages)
 
     def _ensure_doc_loaded(self, doc_id: str):
         doc = self.documents.get(doc_id)
@@ -399,6 +422,29 @@ class PageIndexClient:
         if self.store:
             self._ensure_doc_loaded(doc_id)
         return get_page_content(self.documents, doc_id, pages)
+
+    def get_retrieval_payload(self, doc_id: str) -> dict:
+        """Return internal page and structure data used by enhanced PDF retrieval."""
+        if self.store:
+            self._ensure_doc_loaded(doc_id)
+        doc = self.documents.get(doc_id) or {}
+        return {
+            "type": doc.get("type", ""),
+            "source_sha256": doc.get("source_sha256", ""),
+            "pages": list(doc.get("pages", []) or []),
+            "structure": list(doc.get("structure", []) or []),
+        }
+
+    def get_long_context_payload(self, doc_id: str) -> dict:
+        """Return only the dedicated per-page text artifact used by long-context extraction."""
+        if not self.store:
+            doc = self.documents.get(doc_id) or {}
+            pages = doc.get("pages")
+            if isinstance(pages, list) and pages:
+                return {"doc_id": doc_id, "page_count": len(pages), "pages": list(pages)}
+            return {}
+        payload = self.store.load_page_payload(doc_id)
+        return payload if isinstance(payload, dict) else {}
 
     def get_tree_id(self, doc_id: str) -> str:
         doc = self.documents.get(doc_id)

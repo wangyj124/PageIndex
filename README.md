@@ -436,6 +436,7 @@ curl -X POST "http://127.0.0.1:8000/api/v1/upload_and_build" ^
 - `doc_id`：上一步建树完成后得到的文档 ID
 - `schema_def`：动态抽取 schema
 - `require_evidence`：是否输出带证据溯源的结构化结果，默认 `false`
+- `long_context_mode`：是否直接以完整分页原文作为模型上下文，默认 `false`
 
 `schema_def` 当前支持两种风格：
 
@@ -444,13 +445,17 @@ curl -X POST "http://127.0.0.1:8000/api/v1/upload_and_build" ^
 
 如果 `require_evidence=true`，建议使用标准 JSON Schema 顶层 `properties` 风格。服务端会自动把结果整理为包含 `value/page_number/section_title/original_quote` 的结构。
 
+如果 `long_context_mode=true`，抽取任务会读取建树阶段生成的独立分页原文产物，并绕过文档树摘要、检索和引用跳转链路。上线前已建树但缺少分页原文产物的文档需要重新上传并完成建树。该模式与 `require_evidence=true` 同时使用时，`section_title` 返回空字符串。
+
+长上下文抽取使用 `pageindex/config.yaml` 中独立的 `long_context_model` 配置；部署时应将该值设置为能够容纳完整文档上下文的模型。直接使用 `PageIndexClient(workspace=None)` 的 SDK 调用会复用当前内存中的分页原文，不要求 workspace 产物。
+
 示例命令：
 
 ```bash
 curl -X POST "http://127.0.0.1:8000/api/v1/extract" ^
   -H "accept: application/json" ^
   -H "Content-Type: application/json" ^
-  -d "{\"doc_id\":\"doc-build-demo\",\"schema_def\":{\"type\":\"object\",\"properties\":{\"party_a\":{\"type\":\"string\",\"description\":\"甲方\"},\"party_b\":{\"type\":\"string\",\"description\":\"乙方\"}}},\"require_evidence\":true}"
+  -d "{\"doc_id\":\"doc-build-demo\",\"schema_def\":{\"type\":\"object\",\"properties\":{\"party_a\":{\"type\":\"string\",\"description\":\"甲方\"},\"party_b\":{\"type\":\"string\",\"description\":\"乙方\"}}},\"require_evidence\":true,\"long_context_mode\":true}"
 ```
 
 返回示例：
@@ -538,6 +543,7 @@ curl "http://127.0.0.1:8000/api/v1/task/b7c2f5c5f1f6496f9858a2dbe4b9b4e0"
 - `tree_id`
 - `result_status`
 - `require_evidence`
+- `long_context_mode`
 - `extracted_count`
 - `total_count`
 - 错误信息（如果失败）
@@ -641,13 +647,14 @@ CLI 默认输出一个 `*_structure.json` 文件，常见字段包括：
 - `doc_id`
 - `tree_id`
 - `require_evidence`
+- `long_context_mode`
 - `extraction_result`
 
 当 `require_evidence=false` 时，`extraction_result` 中每个字段通常包含：
 
 - `status`
-- `value`
-- `evidence`
+- `value`：命中字段所在的完整合同条款原文；如果多个条款共同支持结果，按条款逐条返回
+- `evidence`：支撑判断的核心原文片段，可使用省略号压缩上下文
 - `pages`
 - `confidence`
 - `reason`
@@ -657,7 +664,7 @@ CLI 默认输出一个 `*_structure.json` 文件，常见字段包括：
 - `value`
 - `page_number`
 - `section_title`
-- `original_quote`
+- `original_quote`：核心原文片段，可使用省略号压缩上下文，不返回完整条款全文
 - `status`
 - `confidence`
 - `reason`
