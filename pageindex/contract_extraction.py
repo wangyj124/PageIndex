@@ -8,6 +8,8 @@ from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 
+import yaml
+
 from .bm25_retrieve import build_page_documents, retrieve_bm25_candidates
 from .llm import count_tokens, extract_json, llm_acompletion
 from .reference_resolution import filter_valid_reference_pages, normalize_reference_text
@@ -16,6 +18,8 @@ from .vector_retrieve import retrieve_vector_candidates
 
 logger = logging.getLogger(__name__)
 QUERY_SPEC_PROMPT_VERSION = "v2"
+FIELD_INSTRUCTIONS_PATH = Path(__file__).parent / "field_instructions.yaml"
+_FIELD_INSTRUCTION_CACHE = None
 
 
 class ConfidenceLevel(str, Enum):
@@ -40,6 +44,38 @@ class FieldSpec:
     instruction: str = ""
 
 
+def _normalize_field_instruction_key(value):
+    return "".join(str(value or "").split())
+
+
+def _load_field_instruction_map():
+    global _FIELD_INSTRUCTION_CACHE
+    if _FIELD_INSTRUCTION_CACHE is not None:
+        return _FIELD_INSTRUCTION_CACHE
+    try:
+        with open(FIELD_INSTRUCTIONS_PATH, "r", encoding="utf-8") as f:
+            payload = yaml.safe_load(f) or {}
+    except FileNotFoundError:
+        logger.warning("Field instruction config not found: %s", FIELD_INSTRUCTIONS_PATH)
+        _FIELD_INSTRUCTION_CACHE = {}
+        return _FIELD_INSTRUCTION_CACHE
+    raw_mapping = payload.get("field_instructions", payload)
+    if not isinstance(raw_mapping, dict):
+        logger.warning("Field instruction config must be a mapping: %s", FIELD_INSTRUCTIONS_PATH)
+        _FIELD_INSTRUCTION_CACHE = {}
+        return _FIELD_INSTRUCTION_CACHE
+    _FIELD_INSTRUCTION_CACHE = {
+        _normalize_field_instruction_key(description): str(instruction).strip()
+        for description, instruction in raw_mapping.items()
+        if _normalize_field_instruction_key(description) and str(instruction).strip() and str(instruction).strip() != "/"
+    }
+    return _FIELD_INSTRUCTION_CACHE
+
+
+def _default_instruction_for_description(description):
+    return _load_field_instruction_map().get(_normalize_field_instruction_key(description), "")
+
+
 def normalize_schema(schema):
     if isinstance(schema, dict) and "fields" in schema:
         schema = schema["fields"]
@@ -54,13 +90,16 @@ def normalize_schema(schema):
         description = str(item.get("description", "")).strip()
         if not name or not description:
             raise ValueError("each field definition must include non-empty 'name' and 'description'")
+        instruction = str(item.get("instruction", "")).strip()
+        if not instruction:
+            instruction = _default_instruction_for_description(description)
         fields.append(
             FieldSpec(
                 name=name,
                 description=description,
                 type=str(item.get("type", "string")).strip() or "string",
                 required=bool(item.get("required", False)),
-                instruction=str(item.get("instruction", "")).strip(),
+                instruction=instruction,
             )
         )
     return fields
@@ -1129,6 +1168,7 @@ async def _extract_one_field_enhanced(
             vector_fallback_used = False
             deferred_found_result = None
             deferred_found_event = None
+            attempt_index = 0
             last_reason = "no candidate pages yielded a supported answer"
 
             while True:
@@ -1357,6 +1397,7 @@ async def _extract_one_field_enhanced(
                     "current_page_content": current_page_content,
                 }
                 try:
+                    attempt_index += 1
                     result = await _extract_payload(client, field, extraction_context, retries, timeout_seconds)
                 except Exception as exc:
                     if deferred_found_result is not None:
@@ -1392,6 +1433,30 @@ async def _extract_one_field_enhanced(
                         method = "tree"
                     else:
                         method = "bm25"
+                    pending_tree_pages = [
+                        candidate["page"]
+                        for candidate in candidate_pool
+                        if "tree" in candidate.get("sources", []) and candidate.get("read_status") == "pending"
+                    ]
+                    found_candidate_event = {
+                        "attempt_index": attempt_index,
+                        "loaded_pages": loaded_pages,
+                        "content_units": [candidate["content_unit"] for candidate in batch],
+                        "evidence_pages": supporting_pages,
+                        "resolution_method": method,
+                        "retrieval_sources": sources,
+                        "deferred_due_to_pending_tree_work": bool(pending_tree_pages),
+                        "pending_tree_pages": pending_tree_pages,
+                        "confidence": result.get("confidence"),
+                    }
+                    if _setting(client, "retrieval_log_evidence_preview_enabled", False):
+                        found_candidate_event["evidence_preview"] = str(result.get("evidence", ""))[:80]
+                    _emit_retrieval_log(
+                        retrieval_logger,
+                        "field_extraction_found_candidate",
+                        field.name,
+                        **found_candidate_event,
+                    )
                     found_event = {
                         "status": result["status"],
                         "resolution_method": method,

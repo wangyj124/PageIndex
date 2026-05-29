@@ -32,7 +32,7 @@ pageindex = "pageindex.cli:main"
 include-package-data = true
 
 [tool.setuptools.package-data]
-pageindex = ["config.yaml"]
+pageindex = ["config.yaml", "field_instructions.yaml"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

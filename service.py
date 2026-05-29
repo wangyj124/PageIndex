@@ -5,7 +5,7 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any, Callable
 
-from pageindex import PageIndexClient, extract_contract_fields
+from pageindex import PageIndexClient, extract_contract_fields, normalize_schema
 from pageindex.logging_utils import JsonLogger
 from pageindex.utils import convert_word_to_pdf
 
@@ -210,6 +210,18 @@ def _build_evidence_result(
     return evidence_result
 
 
+def _attach_result_instructions(
+    extraction_result: dict[str, Any],
+    extraction_schema: dict[str, Any] | list[dict[str, Any]],
+) -> dict[str, Any]:
+    """在最终输出中附加本次字段抽取实际使用的 instruction。"""
+    instruction_by_field = {field.name: field.instruction for field in normalize_schema(extraction_schema)}
+    for field_name, payload in extraction_result.items():
+        if isinstance(payload, dict):
+            payload["instruction"] = instruction_by_field.get(field_name, "")
+    return extraction_result
+
+
 def build_document_tree(
     file_path: str,
     output_dir: str,
@@ -358,6 +370,7 @@ def extract_dynamic_schema(
     if require_evidence:
         structure = None if long_context_mode else json.loads(client.get_document_structure(doc_id))
         final_result = _build_evidence_result(extraction_result, structure)
+    final_result = _attach_result_instructions(final_result, extraction_schema)
 
     payload = {
         "status": "success",

@@ -205,6 +205,7 @@ def test_extract_dynamic_schema_persists_result_and_forwards_progress(monkeypatc
     assert payload["tree_id"] == "tree-demo"
     assert payload["require_evidence"] is False
     assert payload["extraction_result"]["contract_amount"]["value"] == "100万元"
+    assert payload["extraction_result"]["contract_amount"]["instruction"] == ""
     assert captured["workspace"] == str(workspace_dir.resolve())
     assert captured["tree_doc_id"] == "doc-demo"
     assert captured["extract_doc_id"] == "doc-demo"
@@ -274,6 +275,54 @@ def test_extract_dynamic_schema_forwards_json_schema_field_instruction(monkeypat
     assert field["description"] == "合同价格 合同总价"
     assert field["required"] is True
     assert field["instruction"] == "优先提取含税总价"
+
+
+def test_extract_dynamic_schema_outputs_instruction_from_description_config(monkeypatch, tmp_path):
+    output_dir = tmp_path / "output"
+    workspace_dir = tmp_path / "workspace"
+    schema = {"fields": [{"name": "advance_payment", "description": "10%预付款"}]}
+
+    class DummyClient:
+        def __init__(self, workspace):
+            self.workspace = workspace
+
+        def get_tree_id(self, doc_id):
+            return "tree-demo"
+
+    def fake_extract(
+        client,
+        doc_id,
+        input_schema,
+        max_concurrency=8,
+        progress_callback=None,
+        retrieval_logger=None,
+        long_context_mode=False,
+    ):
+        return {
+            "advance_payment": {
+                "status": "found",
+                "value": "预付款为10%。",
+                "evidence": "预付款为10%。",
+                "pages": [5],
+                "confidence": "High",
+                "reason": None,
+            }
+        }
+
+    monkeypatch.setattr(service, "PageIndexClient", DummyClient)
+    monkeypatch.setattr(service, "extract_contract_fields", fake_extract)
+
+    result = service.extract_dynamic_schema(
+        doc_id="doc-demo",
+        schema=schema,
+        output_dir=str(output_dir),
+        workspace_dir=str(workspace_dir),
+    )
+
+    payload = json.loads(Path(result["output_path"]).read_text(encoding="utf-8"))
+
+    assert payload["extraction_result"]["advance_payment"]["value"] == "预付款为10%。"
+    assert "预付款的金额、百分比、付款条件" in payload["extraction_result"]["advance_payment"]["instruction"]
 
 
 def test_extract_dynamic_schema_injects_evidence_and_reformats_output(monkeypatch, tmp_path):
@@ -366,6 +415,8 @@ def test_extract_dynamic_schema_injects_evidence_and_reformats_output(monkeypatc
     assert "original_quote 只返回核心原文片段" in captured["extract_schema"]["fields"][0]["instruction"]
     assert payload["require_evidence"] is True
     assert payload["extraction_result"]["amount"]["value"] == "500万"
+    assert "优先提取含税总价" in payload["extraction_result"]["amount"]["instruction"]
+    assert "value、page_number、section_title、original_quote" in payload["extraction_result"]["amount"]["instruction"]
     assert payload["extraction_result"]["amount"]["page_number"] == [4]
     assert payload["extraction_result"]["amount"]["section_title"] == "价格条款"
     assert payload["extraction_result"]["amount"]["original_quote"] == "合同总价暂定为人民币500万元。"

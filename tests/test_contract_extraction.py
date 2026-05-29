@@ -75,6 +75,26 @@ def test_normalize_schema_accepts_fields_wrapper():
     assert fields[0].required is True
 
 
+def test_normalize_schema_fills_instruction_from_description_config():
+    fields = normalize_schema([{"name": "advance_payment", "description": "10%预付款"}])
+
+    assert "预付款的金额、百分比、付款条件" in fields[0].instruction
+
+
+def test_normalize_schema_keeps_explicit_instruction_over_config():
+    fields = normalize_schema(
+        [{"name": "advance_payment", "description": "10%预付款", "instruction": "只提取显式约定"}]
+    )
+
+    assert fields[0].instruction == "只提取显式约定"
+
+
+def test_normalize_schema_matches_description_config_after_whitespace_normalization():
+    fields = normalize_schema([{"name": "advance_payment", "description": "  出国\n预付款  "}])
+
+    assert fields[0].instruction == "请提取合同中关于出国预付款金额、比例及支付节点等相关条款。"
+
+
 def test_model_prompts_do_not_expose_field_name_identifier():
     field = FieldSpec(
         name="field_001_advance_payment_mismatch",
@@ -540,6 +560,11 @@ def test_enhanced_extraction_preserves_locator_page_priority(monkeypatch):
 
 def test_enhanced_extraction_deferred_tree_found_survives_later_error(monkeypatch):
     loaded_pages = []
+    events = []
+
+    class CaptureLogger:
+        def info(self, payload):
+            events.append(payload)
 
     async def fake_llm_acompletion(model, prompt):
         if "生成页级检索规格" in prompt:
@@ -576,12 +601,82 @@ def test_enhanced_extraction_deferred_tree_found_survives_later_error(monkeypatc
         "doc-demo",
         [{"name": "target", "description": "目标字段"}],
         include_retrieval_metadata=True,
+        retrieval_logger=CaptureLogger(),
     )["target"]
 
     assert result["status"] == "found"
     assert result["value"] == "目标值"
     assert result["pages"] == [1]
     assert loaded_pages == [1, 2]
+    found_events = [event for event in events if event["event"] == "field_extraction_found_candidate"]
+    assert found_events == [
+        {
+            "event": "field_extraction_found_candidate",
+            "field": "target",
+            "attempt_index": 1,
+            "loaded_pages": [1],
+            "content_units": ["1"],
+            "evidence_pages": [1],
+            "resolution_method": "tree",
+            "retrieval_sources": ["tree"],
+            "deferred_due_to_pending_tree_work": True,
+            "pending_tree_pages": [2],
+            "confidence": "High",
+        }
+    ]
+    assert "evidence_preview" not in found_events[0]
+    completed_event = next(event for event in events if event["event"] == "field_extraction_completed")
+    assert completed_event["status"] == "found"
+    assert completed_event["evidence_pages"] == [1]
+
+
+def test_found_candidate_log_can_include_truncated_evidence_preview(monkeypatch):
+    events = []
+
+    class CaptureLogger:
+        def info(self, payload):
+            events.append(payload)
+
+    long_evidence = "证据" * 60
+
+    async def fake_llm_acompletion(model, prompt):
+        if "生成页级检索规格" in prompt:
+            raise AssertionError("BM25 query generation should not run for tree hit")
+        if "定位最相关的页面" in prompt:
+            return '{"locations":[{"title":"正文","pages":[1],"reason":"direct"}]}'
+        return json.dumps(
+            {
+                "status": "found",
+                "value": "目标值",
+                "evidence": long_evidence,
+                "pages": [1],
+                "confidence": "High",
+                "reason": None,
+            },
+            ensure_ascii=False,
+        )
+
+    monkeypatch.setattr("pageindex.contract_extraction.llm_acompletion", fake_llm_acompletion)
+    client = EnhancedStubClient(
+        pages=[{"page": 1, "content": "目标字段为目标值。"}],
+        structure=[{"title": "正文", "start_page": 1, "end_page": 1, "nodes": []}],
+        bm25_selected_page_limit=0,
+        vector_enabled=False,
+        retrieval_log_evidence_preview_enabled=True,
+    )
+
+    extract_contract_fields(
+        client,
+        "doc-demo",
+        [{"name": "target", "description": "目标字段"}],
+        retrieval_logger=CaptureLogger(),
+    )
+
+    found_event = next(event for event in events if event["event"] == "field_extraction_found_candidate")
+    assert found_event["evidence_preview"] == long_evidence[:80]
+    assert len(found_event["evidence_preview"]) == 80
+    assert "value" not in found_event
+    assert "evidence" not in found_event
 
 
 def test_enhanced_extraction_uses_tree_locations_and_skips_initial_bm25(monkeypatch):
