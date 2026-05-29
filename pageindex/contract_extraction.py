@@ -1005,6 +1005,12 @@ async def _extract_one_field_enhanced(
                                     chunk_top_k=_setting(client, "vector_chunk_top_k", 30),
                                     page_limit=_setting(client, "vector_page_limit", 5),
                                     context_token_budget=_setting(client, "vector_context_token_budget", 10000),
+                                    embedding_batch_size=_setting(client, "embedding_batch_size", 64),
+                                    embedding_request_token_budget=_setting(
+                                        client,
+                                        "embedding_request_token_budget",
+                                        8192,
+                                    ),
                                     cache_enabled=_setting(client, "vector_index_cache_enabled", True),
                                 )
                             logger.debug(

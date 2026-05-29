@@ -124,6 +124,55 @@ async def _call_embedding(texts: list[str], model: str, embedding_fn=None) -> li
     return await asyncio.to_thread(request)
 
 
+def _embedding_batches(
+    texts: list[str],
+    *,
+    batch_size: int,
+    request_token_budget: int,
+) -> list[list[str]]:
+    batch_size = max(1, int(batch_size))
+    request_token_budget = max(1, int(request_token_budget))
+    batches: list[list[str]] = []
+    current: list[str] = []
+    current_tokens = 0
+
+    for text in texts:
+        token_count = max(1, _safe_token_count(text))
+        if current and (
+            len(current) >= batch_size or current_tokens + token_count > request_token_budget
+        ):
+            batches.append(current)
+            current = []
+            current_tokens = 0
+        current.append(text)
+        current_tokens += token_count
+
+    if current:
+        batches.append(current)
+    return batches
+
+
+async def _call_embedding_batched(
+    texts: list[str],
+    model: str,
+    *,
+    batch_size: int,
+    request_token_budget: int,
+    embedding_fn=None,
+) -> list[list[float]]:
+    embeddings: list[list[float]] = []
+    for batch in _embedding_batches(
+        texts,
+        batch_size=batch_size,
+        request_token_budget=request_token_budget,
+    ):
+        batch_embeddings = await _call_embedding(batch, model, embedding_fn=embedding_fn)
+        if len(batch_embeddings) != len(batch):
+            raise ValueError("embedding response did not match batch input count")
+        embeddings.extend(batch_embeddings)
+    return embeddings
+
+
 def _write_json_atomic(path: Path, payload: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary_path = path.with_suffix(path.suffix + ".tmp")
@@ -154,6 +203,8 @@ async def retrieve_vector_candidates(
     chunk_top_k: int = 30,
     page_limit: int = 5,
     context_token_budget: int = 10000,
+    embedding_batch_size: int = 64,
+    embedding_request_token_budget: int = 8192,
     cache_enabled: bool = True,
     embedding_fn=None,
 ) -> list[dict]:
@@ -177,7 +228,13 @@ async def retrieve_vector_candidates(
         indexed_chunks = cache_payload["chunks"]
     else:
         logger.debug("Building vector index for doc_id=%s chunks=%s", doc_id, len(chunks))
-        embeddings = await _call_embedding([item["text"] for item in chunks], embedding_model, embedding_fn=embedding_fn)
+        embeddings = await _call_embedding_batched(
+            [item["text"] for item in chunks],
+            embedding_model,
+            batch_size=embedding_batch_size,
+            request_token_budget=embedding_request_token_budget,
+            embedding_fn=embedding_fn,
+        )
         if len(embeddings) != len(chunks):
             raise ValueError("embedding response did not match chunk count")
         indexed_chunks = [{**chunk, "embedding": embedding} for chunk, embedding in zip(chunks, embeddings)]
@@ -191,7 +248,13 @@ async def retrieve_vector_candidates(
                 },
             )
 
-    query_vectors = await _call_embedding([query_text], embedding_model, embedding_fn=embedding_fn)
+    query_vectors = await _call_embedding_batched(
+        [query_text],
+        embedding_model,
+        batch_size=embedding_batch_size,
+        request_token_budget=embedding_request_token_budget,
+        embedding_fn=embedding_fn,
+    )
     if not query_vectors:
         return []
     query_vector = query_vectors[0]

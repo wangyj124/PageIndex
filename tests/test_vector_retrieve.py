@@ -49,6 +49,70 @@ def test_vector_retrieval_persists_index_and_aggregates_pages(tmp_path):
     assert list((tmp_path / "_retrieval" / "vector").glob("*.json"))
 
 
+def test_vector_retrieval_batches_index_embeddings_by_count(monkeypatch):
+    monkeypatch.setattr("pageindex.vector_retrieve._safe_token_count", lambda text: len(text))
+    calls = []
+
+    def embedding_fn(texts, model):
+        calls.append(list(texts))
+        return [[1.0, 0.0] for _ in texts]
+
+    result = asyncio.run(
+        retrieve_vector_candidates(
+            doc_id="doc-demo",
+            source_sha256="sha",
+            page_documents=[
+                {"page": 1, "section_path": "", "content": "aa"},
+                {"page": 2, "section_path": "", "content": "bb"},
+                {"page": 3, "section_path": "", "content": "cc"},
+                {"page": 4, "section_path": "", "content": "dd"},
+                {"page": 5, "section_path": "", "content": "ee"},
+            ],
+            query_text="目标",
+            processed_pages=set(),
+            workspace=None,
+            embedding_model="openai/test-embedding",
+            embedding_batch_size=2,
+            embedding_request_token_budget=100,
+            embedding_fn=embedding_fn,
+        )
+    )
+
+    assert [len(call) for call in calls] == [2, 2, 1, 1]
+    assert [candidate["page"] for candidate in result] == [1, 2, 3, 4, 5]
+
+
+def test_vector_retrieval_batches_index_embeddings_by_token_budget(monkeypatch):
+    monkeypatch.setattr("pageindex.vector_retrieve._safe_token_count", lambda text: len(text))
+    calls = []
+
+    def embedding_fn(texts, model):
+        calls.append(list(texts))
+        return [[1.0, 0.0] for _ in texts]
+
+    asyncio.run(
+        retrieve_vector_candidates(
+            doc_id="doc-demo",
+            source_sha256="sha",
+            page_documents=[
+                {"page": 1, "section_path": "", "content": "aaaa"},
+                {"page": 2, "section_path": "", "content": "bbbb"},
+                {"page": 3, "section_path": "", "content": "cc"},
+            ],
+            query_text="目标",
+            processed_pages=set(),
+            workspace=None,
+            embedding_model="openai/test-embedding",
+            embedding_batch_size=10,
+            embedding_request_token_budget=8,
+            embedding_fn=embedding_fn,
+        )
+    )
+
+    assert calls[:2] == [["aaaa", "bbbb"], ["cc"]]
+    assert calls[-1] == ["目标"]
+
+
 def test_vector_retrieval_obeys_page_context_budget(monkeypatch):
     monkeypatch.setattr("pageindex.vector_retrieve._safe_token_count", lambda text: len(text))
 

@@ -98,6 +98,12 @@ Linux 部署说明：
 - 覆盖转换接口：设置 `PAGEINDEX_WORD_TO_PDF_CONVERT_URL`
 - 覆盖请求超时：设置 `PAGEINDEX_WORD_TO_PDF_CONVERT_TIMEOUT`，单位秒，默认 `120`
 
+向量兜底检索说明：
+
+- `pageindex/config.yaml` 中的 `embedding_batch_size` 控制单次 embedding 请求最多文本条数
+- `embedding_request_token_budget` 控制单次 embedding 请求的估算总 token，默认 `8192`
+- 大文档会按上述参数分批构建向量索引，避免把全部 chunks 一次性提交给 embedding 服务
+
 ### 4.2 请求参数
 
 表单字段：

@@ -8,6 +8,8 @@ def test_config_loader_merges_defaults():
     assert opt.long_context_model == "openai/deepseek-v4-flash"
     assert opt.bm25_primary_rrf_weight == 3.0
     assert opt.embedding_model == "openai/bge-m3:latest"
+    assert opt.embedding_batch_size == 64
+    assert opt.embedding_request_token_budget == 8192
 
 
 def test_config_loader_accepts_long_context_model_override():

@@ -188,6 +188,8 @@ OPENAI_API_KEY=your_openai_api_key
 
 当前仓库默认通过 LiteLLM 适配模型调用，最常用的是配置 `OPENAI_API_KEY`。如果你的运行环境已通过系统环境变量注入，也可以不创建 `.env` 文件。
 
+向量兜底检索的 embedding 参数在 `pageindex/config.yaml` 中配置。`embedding_batch_size` 控制单次 embedding 请求最多包含多少条文本，`embedding_request_token_budget` 控制单次请求的估算总 token，默认 `8192`，用于匹配默认 8K 上下文的嵌入模型并避免大文档一次性提交过多 chunks。
+
 ## 使用方法
 
 ### 1. 标准 PDF 建树

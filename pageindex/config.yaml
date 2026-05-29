@@ -40,6 +40,8 @@ reference_total_page_limit: 9
 vector_enabled: true
 vector_fallback_max_runs: 1
 embedding_model: "openai/bge-m3:latest"
+embedding_batch_size: 64
+embedding_request_token_budget: 8192
 vector_index_cache_enabled: true
 vector_chunk_tokens: 300
 vector_chunk_overlap_tokens: 50
