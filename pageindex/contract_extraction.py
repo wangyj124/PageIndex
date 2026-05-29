@@ -75,7 +75,9 @@ def _flatten_structure(structure, path=None):
             continue
         start_page = node.get("start_page", node.get("start_index"))
         end_page = node.get("end_page", node.get("end_index", start_page))
-        summary = str(node.get("summary", "")).strip()
+        content_start_page = node.get("content_start_page", node.get("content_start_index", start_page))
+        content_end_page = node.get("content_end_page", node.get("content_end_index", end_page))
+        summary = str(node.get("summary") or node.get("prefix_summary") or "").strip()
         current_path = path + [title]
         rows.append(
             {
@@ -84,6 +86,8 @@ def _flatten_structure(structure, path=None):
                 "summary": summary,
                 "start_page": start_page,
                 "end_page": end_page,
+                "content_start_page": content_start_page,
+                "content_end_page": content_end_page,
             }
         )
         rows.extend(_flatten_structure(node.get("nodes", []), current_path))
@@ -141,6 +145,67 @@ def _normalize_ranked_page_list(value):
         if page > 0 and page not in pages:
             pages.append(page)
     return pages
+
+
+def _normalize_tree_locations(payload, valid_pages=None, location_limit=3, pages_per_location=3):
+    valid_pages = set(valid_pages) if valid_pages is not None else None
+    location_limit = max(0, int(location_limit))
+    pages_per_location = max(1, int(pages_per_location))
+    if not isinstance(payload, dict):
+        return []
+    if location_limit <= 0:
+        return []
+
+    def normalize_pages(value):
+        pages = []
+        for page in _normalize_ranked_page_list(value):
+            if valid_pages is not None and page not in valid_pages:
+                continue
+            pages.append(page)
+            if len(pages) >= pages_per_location:
+                break
+        return pages
+
+    locations = []
+    raw_locations = payload.get("locations")
+    if isinstance(raw_locations, list):
+        for item in raw_locations:
+            if isinstance(item, dict):
+                pages = normalize_pages(item.get("pages"))
+                reason = str(item.get("reason", "")).strip()
+                title = str(item.get("title", item.get("section_title", ""))).strip()
+            else:
+                pages = normalize_pages(item)
+                reason = ""
+                title = ""
+            if not pages:
+                continue
+            locations.append(
+                {
+                    "location_id": f"tree_location_{len(locations) + 1}",
+                    "pages": pages,
+                    "reason": reason,
+                    "title": title,
+                }
+            )
+            if len(locations) >= location_limit:
+                break
+
+    if locations:
+        return locations
+
+    # Backward compatibility for older locator prompts/tests that return
+    # {"pages": [...]} without explicit tree locations.
+    for page in normalize_pages(payload.get("pages"))[:location_limit]:
+        locations.append(
+            {
+                "location_id": f"tree_location_{len(locations) + 1}",
+                "pages": [page],
+                "reason": str(payload.get("reason", "")).strip(),
+                "title": "",
+            }
+        )
+    return locations
 
 
 def _normalize_field_result(field_name, payload, default_pages=None, allowed_pages=None):
@@ -223,7 +288,7 @@ def _normalize_field_result(field_name, payload, default_pages=None, allowed_pag
     }
 
 
-def _build_locator_prompt(field, structure_digest, page_limit=3):
+def _build_locator_prompt(field, structure_digest, location_limit=3, pages_per_location=3):
     return f"""
 你正在为一项合同字段抽取任务定位最相关的页面。
 
@@ -238,14 +303,19 @@ def _build_locator_prompt(field, structure_digest, page_limit=3):
 
 规则：
 - 只能使用上面的结构摘要进行判断。
-- 返回最小范围的相关页集合，总页数最多 {page_limit} 页。
-- 优先选择标题或摘要中直接提到目标字段的页面。
-- 如果没有强相关候选页，返回空的 pages 列表。
+- 最多返回 {location_limit} 个候选位置；一个章节或一个连续页段算一个位置。
+- 每个候选位置最多返回 {pages_per_location} 页，只选择该位置内最可能包含答案的最小页集合。
+- 如果结构摘要同时包含 start_page/end_page 和 content_start_page/content_end_page，优先使用 content 页码范围定位该节点摘要对应的正文。
+- 不要因为章节范围是 start_page 到 end_page 就机械展开全部页面。
+- 优先选择标题或摘要中直接提到目标字段的位置。
+- 如果没有强相关候选位置，返回空的 locations 列表。
 
 只返回 JSON，格式如下：
 {{
-  "pages": [4, 5],
-  "reason": "说明这些页面为什么可能相关"
+  "locations": [
+    {{"title": "章节或位置标题", "pages": [4, 5], "reason": "说明这个位置为什么可能相关"}}
+  ],
+  "reason": "整体定位说明"
 }}
 """.strip()
 
@@ -394,6 +464,13 @@ def _setting(client, name, default):
     return getattr(getattr(client, "retrieval_config", None), name, default)
 
 
+def _tree_location_limit(client):
+    config = getattr(client, "retrieval_config", None)
+    if config is not None and hasattr(config, "tree_location_limit"):
+        return getattr(config, "tree_location_limit")
+    return _setting(client, "tree_page_limit", 3)
+
+
 def _query_cache_path(client):
     workspace = getattr(client, "workspace", None)
     if workspace is None:
@@ -498,6 +575,8 @@ def _make_candidate(
     score=0.0,
     reference_chain=None,
     reference_depth=0,
+    tree_location_id="",
+    tree_location_title="",
 ):
     document = page_documents_by_page.get(page, {})
     return {
@@ -512,6 +591,8 @@ def _make_candidate(
         "is_chunk": False,
         "reference_chain": list(reference_chain or []),
         "reference_depth": reference_depth,
+        "tree_location_id": tree_location_id,
+        "tree_location_title": tree_location_title,
     }
 
 
@@ -531,6 +612,8 @@ def _ensure_candidate_metadata(candidate):
     candidate.setdefault("reference_chain", [])
     candidate.setdefault("reference_depth", 0)
     candidate.setdefault("evaluation_history", [])
+    candidate.setdefault("tree_location_id", "")
+    candidate.setdefault("tree_location_title", "")
     return candidate
 
 
@@ -654,9 +737,33 @@ def _merge_candidate(candidate_pool, candidate):
         ):
             existing["reference_chain"] = list(candidate_chain)
             existing["reference_depth"] = candidate.get("reference_depth", 0)
+        if candidate.get("tree_location_id") and not existing.get("tree_location_id"):
+            existing["tree_location_id"] = candidate["tree_location_id"]
+            existing["tree_location_title"] = candidate.get("tree_location_title", "")
         return existing
     candidate_pool.append(candidate)
     return candidate
+
+
+def _select_tree_candidates(tree_locations, page_documents_by_page):
+    candidate_pool = []
+    for location in tree_locations:
+        for page in location["pages"]:
+            reason = location.get("reason") or "摘要树定位"
+            if location.get("title"):
+                reason = "；".join([location["title"], reason])
+            _merge_candidate(
+                candidate_pool,
+                _make_candidate(
+                    page,
+                    "tree",
+                    page_documents_by_page,
+                    reason=reason,
+                    tree_location_id=location["location_id"],
+                    tree_location_title=location.get("title", ""),
+                ),
+            )
+    return candidate_pool
 
 
 def _select_initial_candidates(client, tree_pages, bm25_candidates, page_documents_by_page):
@@ -665,7 +772,7 @@ def _select_initial_candidates(client, tree_pages, bm25_candidates, page_documen
 
     ordered = [
         _make_candidate(page, "tree", page_documents_by_page, reason="摘要树定位")
-        for page in tree_pages[: _setting(client, "tree_page_limit", 3)]
+        for page in tree_pages[: _tree_location_limit(client)]
     ]
     ordered.extend(bm25_candidates[: _setting(client, "bm25_selected_page_limit", 6)])
     for candidate in ordered:
@@ -724,6 +831,8 @@ def _candidate_manifest(candidate_pool):
             "candidate_id": candidate.get("candidate_id", f"p{candidate['page']}"),
             "sources": candidate["sources"],
             "section_path": candidate.get("section_path", ""),
+            "tree_location_id": candidate.get("tree_location_id", ""),
+            "tree_location_title": candidate.get("tree_location_title", ""),
             "read_status": candidate["read_status"],
             "chunk_note": (
                 f"物理页 {candidate['page']} 的第 {candidate['chunk_index']}/{candidate['chunk_count']} 个正文分块"
@@ -754,6 +863,22 @@ def _reference_state_for_pages(candidate_pool, pages, preferred_candidates=None)
         if candidate is not None:
             return list(candidate.get("reference_chain", [])), int(candidate.get("reference_depth", 0))
     return [], 0
+
+
+def _has_pending_tree_work(candidate_pool):
+    return any(
+        "tree" in candidate.get("sources", []) and candidate.get("read_status") == "pending"
+        for candidate in candidate_pool
+    )
+
+
+def _candidate_pages(candidate_pool):
+    return {candidate["page"] for candidate in candidate_pool}
+
+
+def _exclude_candidate_pages(candidates, excluded_pages):
+    excluded_pages = set(excluded_pages)
+    return [candidate for candidate in candidates if candidate["page"] not in excluded_pages]
 
 
 def _emit_retrieval_log(retrieval_logger, event, field_name, **details):
@@ -787,11 +912,25 @@ async def _extract_one_field_legacy(client, doc_id, field, structure_digest, sem
         try:
             locator_payload = await _run_json_prompt(
                 client.retrieve_model,
-                _build_locator_prompt(field, structure_digest),
+                _build_locator_prompt(
+                    field,
+                    structure_digest,
+                    _tree_location_limit(client),
+                    _setting(client, "tree_location_page_limit", 3),
+                ),
                 retries=retries,
                 timeout_seconds=timeout_seconds,
             )
-            pages = _normalize_ranked_page_list(locator_payload.get("pages"))
+            tree_locations = _normalize_tree_locations(
+                locator_payload,
+                location_limit=_tree_location_limit(client),
+                pages_per_location=_setting(client, "tree_location_page_limit", 3),
+            )
+            pages = []
+            for location in tree_locations:
+                for page in location["pages"]:
+                    if page not in pages:
+                        pages.append(page)
             if not pages:
                 return field.name, {
                     "status": ExtractionStatus.NOT_FOUND.value,
@@ -879,15 +1018,6 @@ async def _extract_one_field_enhanced(
 ):
     async with semaphore:
         try:
-            query_spec = await _generate_query_spec(client, field, query_cache, retries, timeout_seconds)
-            _emit_retrieval_log(
-                retrieval_logger,
-                "retrieval_query_spec_resolved",
-                field.name,
-                generation_source=query_spec["generation_source"],
-                primary_queries=query_spec["primary_queries"],
-                expanded_keywords=query_spec["expanded_keywords"],
-            )
             page_documents_by_page = {document["page"]: document for document in page_documents}
             valid_pages = set(page_documents_by_page)
             structure_pages = set()
@@ -897,28 +1027,71 @@ async def _extract_one_field_enhanced(
                 if isinstance(start_page, int) and isinstance(end_page, int):
                     structure_pages.update(range(start_page, end_page + 1))
             structure_pages &= valid_pages
+            query_spec = None
+            bm25_candidates = []
+            bm25_candidates_loaded = False
+
+            async def ensure_query_spec():
+                nonlocal query_spec
+                if query_spec is None:
+                    query_spec = await _generate_query_spec(client, field, query_cache, retries, timeout_seconds)
+                    _emit_retrieval_log(
+                        retrieval_logger,
+                        "retrieval_query_spec_resolved",
+                        field.name,
+                        generation_source=query_spec["generation_source"],
+                        primary_queries=query_spec["primary_queries"],
+                        expanded_keywords=query_spec["expanded_keywords"],
+                    )
+                return query_spec
+
+            def load_bm25_candidates(spec):
+                return retrieve_bm25_candidates(
+                    page_documents,
+                    spec["primary_queries"],
+                    spec["expanded_keywords"],
+                    primary_top_k=_setting(client, "bm25_primary_top_k", 10),
+                    expanded_top_k=_setting(client, "bm25_expanded_top_k", 20),
+                    primary_weight=_setting(client, "bm25_primary_rrf_weight", 3.0),
+                    expanded_weight=_setting(client, "bm25_expanded_rrf_weight", 1.0),
+                    rrf_constant=_setting(client, "bm25_rrf_constant", 60),
+                )
+
             try:
+                tree_location_limit = _tree_location_limit(client)
+                tree_location_page_limit = _setting(client, "tree_location_page_limit", 3)
                 locator_payload = await _run_json_prompt(
                     client.retrieve_model,
-                    _build_locator_prompt(field, structure_digest, _setting(client, "tree_page_limit", 3)),
+                    _build_locator_prompt(
+                        field,
+                        structure_digest,
+                        tree_location_limit,
+                        tree_location_page_limit,
+                    ),
                     retries=retries,
                     timeout_seconds=timeout_seconds,
                 )
-                tree_pages = [page for page in _normalize_ranked_page_list(locator_payload.get("pages")) if page in valid_pages]
+                tree_locations = _normalize_tree_locations(
+                    locator_payload,
+                    valid_pages,
+                    location_limit=tree_location_limit,
+                    pages_per_location=tree_location_page_limit,
+                )
             except Exception:
-                tree_pages = []
+                tree_locations = []
+            tree_pages = []
+            for location in tree_locations:
+                for page in location["pages"]:
+                    if page not in tree_pages:
+                        tree_pages.append(page)
 
-            bm25_candidates = retrieve_bm25_candidates(
-                page_documents,
-                query_spec["primary_queries"],
-                query_spec["expanded_keywords"],
-                primary_top_k=_setting(client, "bm25_primary_top_k", 10),
-                expanded_top_k=_setting(client, "bm25_expanded_top_k", 20),
-                primary_weight=_setting(client, "bm25_primary_rrf_weight", 3.0),
-                expanded_weight=_setting(client, "bm25_expanded_rrf_weight", 1.0),
-                rrf_constant=_setting(client, "bm25_rrf_constant", 60),
-            )
-            candidate_pool = _select_initial_candidates(client, tree_pages, bm25_candidates, page_documents_by_page)
+            if tree_locations:
+                candidate_pool = _select_tree_candidates(tree_locations, page_documents_by_page)
+            else:
+                query_spec = await ensure_query_spec()
+                bm25_candidates = load_bm25_candidates(query_spec)
+                bm25_candidates_loaded = True
+                candidate_pool = _select_initial_candidates(client, [], bm25_candidates, page_documents_by_page)
             logger.debug(
                 "Initial retrieval field=%s tree_pages=%s bm25_pages=%s selected_pages=%s",
                 field.name,
@@ -931,6 +1104,7 @@ async def _extract_one_field_enhanced(
                 "retrieval_candidates_selected",
                 field.name,
                 tree_pages=tree_pages,
+                tree_locations=tree_locations,
                 bm25_candidates=[
                     {
                         "page": candidate["page"],
@@ -953,6 +1127,8 @@ async def _extract_one_field_enhanced(
             logged_chunked_pages: set[int] = set()
             logged_unreadable_units: set[str] = set()
             vector_fallback_used = False
+            deferred_found_result = None
+            deferred_found_event = None
             last_reason = "no candidate pages yielded a supported answer"
 
             while True:
@@ -974,6 +1150,51 @@ async def _extract_one_field_enhanced(
                     )
                 pending = [candidate for candidate in candidate_pool if candidate["read_status"] == "pending"]
                 if not pending:
+                    if deferred_found_result is not None:
+                        if deferred_found_event is not None:
+                            _emit_retrieval_log(
+                                retrieval_logger,
+                                "field_extraction_completed",
+                                field.name,
+                                **deferred_found_event,
+                            )
+                        return deferred_found_result
+                    if not bm25_candidates_loaded:
+                        query_spec = await ensure_query_spec()
+                        bm25_candidates = load_bm25_candidates(query_spec)
+                        bm25_candidates_loaded = True
+                        excluded_pages = _candidate_pages(candidate_pool) | processed_pages
+                        new_bm25_candidates = _exclude_candidate_pages(
+                            bm25_candidates,
+                            excluded_pages,
+                        )
+                        for candidate in _select_initial_candidates(
+                            client,
+                            [],
+                            new_bm25_candidates,
+                            page_documents_by_page,
+                        ):
+                            _merge_candidate(candidate_pool, candidate)
+                        _emit_retrieval_log(
+                            retrieval_logger,
+                            "bm25_fallback_candidates_selected",
+                            field.name,
+                            bm25_candidates=[
+                                {
+                                    "page": candidate["page"],
+                                    "sources": candidate["sources"],
+                                    "section_path": candidate.get("section_path", ""),
+                                    "bm25_score": candidate.get("bm25_score", 0.0),
+                                    "bm25_ranks": candidate.get("bm25_ranks", {}),
+                                    "bm25_raw_scores": candidate.get("bm25_raw_scores", {}),
+                                }
+                                for candidate in bm25_candidates
+                            ],
+                            excluded_pages=sorted(excluded_pages),
+                            candidate_pages=[candidate["page"] for candidate in candidate_pool],
+                        )
+                        if any(candidate["read_status"] == "pending" for candidate in candidate_pool):
+                            continue
                     vector_allowed = (
                         _setting(client, "vector_enabled", True)
                         and not vector_fallback_used
@@ -997,7 +1218,7 @@ async def _extract_one_field_enhanced(
                                     source_sha256=retrieval_payload.get("source_sha256", ""),
                                     page_documents=page_documents,
                                     query_text=vector_query,
-                                    processed_pages=set(processed_pages),
+                                    processed_pages=set(processed_pages) | _candidate_pages(candidate_pool),
                                     workspace=getattr(client, "workspace", None),
                                     embedding_model=_setting(client, "embedding_model", "openai/bge-m3:latest"),
                                     chunk_tokens=_setting(client, "vector_chunk_tokens", 300),
@@ -1135,7 +1356,15 @@ async def _extract_one_field_enhanced(
                     "previously_read_pages": sorted(processed_pages - set(loaded_pages)),
                     "current_page_content": current_page_content,
                 }
-                result = await _extract_payload(client, field, extraction_context, retries, timeout_seconds)
+                try:
+                    result = await _extract_payload(client, field, extraction_context, retries, timeout_seconds)
+                except Exception as exc:
+                    if deferred_found_result is not None:
+                        last_reason = str(exc)
+                        for candidate in batch:
+                            candidate["read_status"] = "evaluation_error"
+                        continue
+                    raise
                 if result["status"] == ExtractionStatus.FOUND.value:
                     for candidate in batch:
                         candidate["read_status"] = "evaluated_found"
@@ -1163,16 +1392,35 @@ async def _extract_one_field_enhanced(
                         method = "tree"
                     else:
                         method = "bm25"
+                    found_event = {
+                        "status": result["status"],
+                        "resolution_method": method,
+                        "evidence_pages": supporting_pages,
+                        "retrieval_sources": sources,
+                    }
+                    found_result = (field.name, _metadata_result(result, method, sources, evidence_chain))
+                    if _has_pending_tree_work(candidate_pool):
+                        if deferred_found_result is None:
+                            deferred_found_result = found_result
+                            deferred_found_event = found_event
+                        reference_context_pages = []
+                        continue
+                    if deferred_found_result is not None:
+                        if deferred_found_event is not None:
+                            _emit_retrieval_log(
+                                retrieval_logger,
+                                "field_extraction_completed",
+                                field.name,
+                                **deferred_found_event,
+                            )
+                        return deferred_found_result
                     _emit_retrieval_log(
                         retrieval_logger,
                         "field_extraction_completed",
                         field.name,
-                        status=result["status"],
-                        resolution_method=method,
-                        evidence_pages=supporting_pages,
-                        retrieval_sources=sources,
+                        **found_event,
                     )
-                    return field.name, _metadata_result(result, method, sources, evidence_chain)
+                    return found_result
 
                 last_reason = result.get("reason", last_reason)
                 if result["status"] == ExtractionStatus.ERROR.value:
@@ -1184,6 +1432,18 @@ async def _extract_one_field_enhanced(
                         field.name,
                         pages=loaded_pages,
                     )
+                    if deferred_found_result is not None:
+                        if _has_pending_tree_work(candidate_pool):
+                            reference_context_pages = []
+                            continue
+                        if deferred_found_event is not None:
+                            _emit_retrieval_log(
+                                retrieval_logger,
+                                "field_extraction_completed",
+                                field.name,
+                                **deferred_found_event,
+                            )
+                        return deferred_found_result
                     return field.name, _metadata_result(result, "error", [], [])
                 if result["status"] != ExtractionStatus.REFERENCE_FOUND.value:
                     for candidate in batch:

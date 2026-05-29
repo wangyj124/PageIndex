@@ -329,14 +329,152 @@ def convert_page_to_int(data):
 
 def add_node_text(node, pdf_pages):
     if isinstance(node, dict):
-        start_page = node.get("start_index")
-        end_page = node.get("end_index")
+        start_page = node.get("content_start_index", node.get("start_index"))
+        end_page = node.get("content_end_index", node.get("end_index"))
         node["text"] = get_text_of_pdf_pages(pdf_pages, start_page, end_page)
         if "nodes" in node:
             add_node_text(node["nodes"], pdf_pages)
     elif isinstance(node, list):
         for index in range(len(node)):
             add_node_text(node[index], pdf_pages)
+
+
+def _split_page_range(start_page, end_page, max_pages):
+    total_pages = end_page - start_page + 1
+    if total_pages <= max_pages:
+        return [(start_page, end_page)]
+
+    if total_pages <= 10:
+        sizes = []
+        remaining = total_pages
+        while remaining > 0:
+            if remaining <= 3:
+                sizes.append(remaining)
+                break
+            if remaining == 4:
+                sizes.extend([2, 2])
+                break
+            sizes.append(2)
+            remaining -= 2
+    else:
+        sizes = []
+        remaining = total_pages
+        while remaining > 0:
+            size = min(max_pages, remaining)
+            sizes.append(size)
+            remaining -= size
+
+    ranges = []
+    current = start_page
+    for size in sizes:
+        ranges.append((current, current + size - 1))
+        current += size
+    return ranges
+
+
+def normalize_tree_retrieval_segments(
+    structure,
+    page_text_getter=None,
+    max_pages_per_segment=5,
+    start_key=None,
+    end_key=None,
+):
+    if not structure:
+        return structure
+
+    sample = structure[0] if isinstance(structure, list) and structure else structure
+    if start_key is None:
+        start_key = "start_page" if "start_page" in sample else "start_index"
+    if end_key is None:
+        end_key = "end_page" if start_key == "start_page" else "end_index"
+    content_start_key = f"content_{start_key}"
+    content_end_key = f"content_{end_key}"
+
+    def set_text(node, start_page, end_page):
+        if page_text_getter is not None:
+            if node.get("text") and not node.get("is_virtual_node"):
+                return
+            node["text"] = page_text_getter(start_page, end_page)
+
+    def make_virtual_node(parent, start_page, end_page, index, total, reason):
+        page_label = "页" if start_key == "start_page" else "页"
+        title = f"分页片段 {index}/{total}（第{start_page}-{end_page}{page_label}）"
+        node = {
+            "title": title,
+            start_key: start_page,
+            end_key: end_page,
+            content_start_key: start_page,
+            content_end_key: end_page,
+            "text": "",
+            "nodes": [],
+            "is_virtual_node": True,
+            "virtual_reason": reason,
+            "parent_title": parent.get("title", ""),
+        }
+        set_text(node, start_page, end_page)
+        return node
+
+    def apply_content_segment(node, start_page, end_page):
+        if not isinstance(start_page, int) or not isinstance(end_page, int):
+            return []
+        if end_page < start_page:
+            end_page = start_page
+
+        node[content_start_key] = start_page
+        node[content_end_key] = end_page
+        ranges = _split_page_range(start_page, end_page, max_pages_per_segment)
+        if len(ranges) == 1:
+            set_text(node, start_page, end_page)
+            return []
+
+        node["text"] = ""
+        reason = "medium_segment_split" if (end_page - start_page + 1) <= 10 else "long_segment_fallback"
+        return [
+            make_virtual_node(node, chunk_start, chunk_end, index, len(ranges), reason)
+            for index, (chunk_start, chunk_end) in enumerate(ranges, start=1)
+        ]
+
+    def resolve_segment_end(node, next_start, container_end):
+        node_end = node.get(end_key)
+        if isinstance(node_end, int):
+            return node_end
+        if isinstance(next_start, int):
+            return next_start
+        return container_end
+
+    def process_nodes(nodes, container_end):
+        for index, node in enumerate(nodes):
+            node_start = node.get(start_key)
+            if not isinstance(node_start, int):
+                continue
+            next_start = nodes[index + 1].get(start_key) if index + 1 < len(nodes) else None
+            segment_end = resolve_segment_end(node, next_start, container_end)
+            if not isinstance(segment_end, int):
+                segment_end = node.get(end_key, node_start)
+            process_node(node, max(segment_end, node_start))
+
+    def process_node(node, segment_end):
+        node_start = node.get(start_key)
+        if not isinstance(node_start, int):
+            return
+        real_children = [child for child in node.get("nodes", []) if not child.get("is_virtual_node")]
+        first_child_start = real_children[0].get(start_key) if real_children else None
+        own_end = first_child_start if isinstance(first_child_start, int) else segment_end
+        own_end = max(own_end, node_start)
+        virtual_children = apply_content_segment(node, node_start, own_end)
+        if real_children:
+            process_nodes(real_children, segment_end)
+        node["nodes"] = [*virtual_children, *real_children]
+
+    root_nodes = structure if isinstance(structure, list) else [structure]
+    for index, node in enumerate(root_nodes):
+        node_start = node.get(start_key)
+        if not isinstance(node_start, int):
+            continue
+        next_start = root_nodes[index + 1].get(start_key) if index + 1 < len(root_nodes) else None
+        segment_end = resolve_segment_end(node, next_start, node.get(end_key, node_start))
+        process_node(node, max(segment_end, node_start))
+    return structure
 
 
 def add_node_text_with_labels(node, pdf_pages):
@@ -462,6 +600,7 @@ __all__ = [
     "convert_physical_index_to_int",
     "convert_page_to_int",
     "add_node_text",
+    "normalize_tree_retrieval_segments",
     "add_node_text_with_labels",
     "generate_node_summary",
     "generate_summaries_for_structure",

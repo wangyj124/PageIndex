@@ -10,10 +10,12 @@ from pageindex.contract_extraction import (
     _build_locator_prompt,
     _build_long_context_extraction_prompt,
     _build_query_generation_prompt,
+    _build_structure_digest,
     _expand_oversized_candidates,
     _generate_query_spec,
     _load_query_cache,
     _normalize_field_result,
+    _normalize_tree_locations,
     _query_cache_key,
     _select_extraction_batch,
     _select_initial_candidates,
@@ -108,6 +110,87 @@ def test_extraction_prompts_require_full_clause_value_and_short_quote():
     assert all("不要总结、改写或只返回字段值" in prompt for prompt in prompts)
     assert all("省略号" in prompt for prompt in prompts)
     assert all("不要把完整条款全文放入 evidence" in prompt for prompt in prompts)
+
+
+def test_tree_locator_prompt_uses_locations_with_page_limit():
+    field = FieldSpec(name="field_001", description="付款比例", type="string")
+    prompt = _build_locator_prompt(field, "[]", location_limit=3, pages_per_location=3)
+
+    assert "最多返回 3 个候选位置" in prompt
+    assert "每个候选位置最多返回 3 页" in prompt
+    assert '"locations"' in prompt
+
+
+def test_tree_location_limit_setting_takes_precedence_over_legacy_tree_page_limit(monkeypatch):
+    prompts = []
+
+    async def fake_llm_acompletion(model, prompt):
+        prompts.append(prompt)
+        if "生成页级检索规格" in prompt:
+            return '{"primary_queries":["无命中"],"expanded_keywords":[]}'
+        if "定位最相关的页面" in prompt:
+            return '{"locations":[]}'
+        return '{"status":"not_found","value":"","evidence":"","pages":[],"confidence":"Low","reason":"none"}'
+
+    monkeypatch.setattr("pageindex.contract_extraction.llm_acompletion", fake_llm_acompletion)
+    client = EnhancedStubClient(
+        pages=[{"page": 1, "content": "无关"}],
+        structure=[{"title": "正文", "start_page": 1, "end_page": 1, "nodes": []}],
+        tree_location_limit=2,
+        tree_page_limit=9,
+        vector_enabled=False,
+    )
+
+    extract_contract_fields(
+        client,
+        "doc-demo",
+        [{"name": "target", "description": "目标字段"}],
+        include_retrieval_metadata=True,
+    )
+
+    locator_prompt = next(prompt for prompt in prompts if "定位最相关的页面" in prompt)
+    assert "最多返回 2 个候选位置" in locator_prompt
+
+
+def test_normalize_tree_locations_limits_locations_pages_and_keeps_legacy_pages():
+    payload = {
+        "locations": [
+            {"title": "第一处", "pages": [1, 2, 3, 4], "reason": "直接相关"},
+            {"title": "第二处", "pages": [3, 5, 99], "reason": "补充位置"},
+            {"title": "第三处", "pages": [6], "reason": "超出位置限制"},
+        ]
+    }
+
+    locations = _normalize_tree_locations(payload, valid_pages={1, 2, 3, 4, 5, 6}, location_limit=2, pages_per_location=3)
+    legacy_locations = _normalize_tree_locations({"pages": [4, 5, 6, 7]}, location_limit=2, pages_per_location=3)
+
+    assert locations == [
+        {"location_id": "tree_location_1", "pages": [1, 2, 3], "reason": "直接相关", "title": "第一处"},
+        {"location_id": "tree_location_2", "pages": [3, 5], "reason": "补充位置", "title": "第二处"},
+    ]
+    assert [location["pages"] for location in legacy_locations] == [[4], [5]]
+
+
+def test_structure_digest_includes_prefix_summary_and_content_page_range():
+    digest = _build_structure_digest(
+        [
+            {
+                "title": "付款",
+                "start_page": 1,
+                "end_page": 10,
+                "content_start_page": 1,
+                "content_end_page": 2,
+                "prefix_summary": "付款前言",
+                "nodes": [],
+            }
+        ]
+    )
+
+    assert '"summary": "付款前言"' in digest
+    assert '"start_page": 1' in digest
+    assert '"end_page": 10' in digest
+    assert '"content_start_page": 1' in digest
+    assert '"content_end_page": 2' in digest
 
 
 def test_extract_contract_fields_retries_invalid_confidence(monkeypatch):
@@ -452,7 +535,238 @@ def test_enhanced_extraction_preserves_locator_page_priority(monkeypatch):
     )["target"]
 
     assert result["value"] == "目标值"
-    assert loaded_pages == [3]
+    assert loaded_pages == [3, 1, 2]
+
+
+def test_enhanced_extraction_deferred_tree_found_survives_later_error(monkeypatch):
+    loaded_pages = []
+
+    async def fake_llm_acompletion(model, prompt):
+        if "生成页级检索规格" in prompt:
+            raise AssertionError("BM25 query generation should not run after a deferred tree result")
+        if "定位最相关的页面" in prompt:
+            return (
+                '{"locations":['
+                '{"title":"第一处","pages":[1],"reason":"direct"},'
+                '{"title":"第二处","pages":[2],"reason":"verify"}'
+                ']}'
+            )
+        if "扫描异常" in prompt:
+            loaded_pages.append(2)
+            return '{"status":"error","value":"","evidence":"","pages":[2],"confidence":"Low","reason":"OCR unreadable"}'
+        if "目标字段为目标值" in prompt:
+            loaded_pages.append(1)
+            return '{"status":"found","value":"目标值","evidence":"目标字段为目标值。","pages":[1],"confidence":"High","reason":null}'
+        raise AssertionError(prompt)
+
+    monkeypatch.setattr("pageindex.contract_extraction.llm_acompletion", fake_llm_acompletion)
+    client = EnhancedStubClient(
+        pages=[
+            {"page": 1, "content": "目标字段为目标值。"},
+            {"page": 2, "content": "扫描异常"},
+        ],
+        structure=[{"title": "正文", "start_page": 1, "end_page": 2, "nodes": []}],
+        bm25_selected_page_limit=0,
+        extract_batch_page_limit=1,
+        vector_enabled=False,
+    )
+
+    result = extract_contract_fields(
+        client,
+        "doc-demo",
+        [{"name": "target", "description": "目标字段"}],
+        include_retrieval_metadata=True,
+    )["target"]
+
+    assert result["status"] == "found"
+    assert result["value"] == "目标值"
+    assert result["pages"] == [1]
+    assert loaded_pages == [1, 2]
+
+
+def test_enhanced_extraction_uses_tree_locations_and_skips_initial_bm25(monkeypatch):
+    extraction_prompts = []
+    calls = []
+
+    async def fake_llm_acompletion(model, prompt):
+        calls.append(prompt)
+        if "生成页级检索规格" in prompt:
+            raise AssertionError("BM25 query generation should be skipped when tree has candidates")
+        if "定位最相关的页面" in prompt:
+            return (
+                '{"locations":['
+                '{"title":"第一处","pages":[1,2,3,4],"reason":"direct"},'
+                '{"title":"第二处","pages":[3,5,6],"reason":"nearby"},'
+                '{"title":"第三处","pages":[7],"reason":"extra"}'
+                ']}'
+            )
+        extraction_prompts.append(prompt)
+        return '{"status":"found","value":"目标值","evidence":"第6页目标值","pages":[6],"confidence":"High","reason":null}'
+
+    monkeypatch.setattr("pageindex.contract_extraction.llm_acompletion", fake_llm_acompletion)
+    client = EnhancedStubClient(
+        pages=[
+            {"page": 1, "content": "tree 1"},
+            {"page": 2, "content": "tree 2"},
+            {"page": 3, "content": "tree 3"},
+            {"page": 4, "content": "truncated"},
+            {"page": 5, "content": "tree 5"},
+            {"page": 6, "content": "第6页目标值"},
+            {"page": 7, "content": "extra"},
+        ],
+        structure=[{"title": "正文", "start_page": 1, "end_page": 7, "nodes": []}],
+        tree_page_limit=2,
+        tree_location_page_limit=3,
+        extract_batch_page_limit=6,
+        vector_enabled=False,
+    )
+
+    result = extract_contract_fields(
+        client,
+        "doc-demo",
+        [{"name": "target", "description": "目标字段"}],
+        include_retrieval_metadata=True,
+    )["target"]
+
+    assert result["status"] == "found"
+    assert result["resolution_method"] == "tree"
+    assert len(extraction_prompts) == 1
+    prompt = extraction_prompts[0]
+    assert all(f'"page": {page}' in prompt for page in [1, 2, 3, 5, 6])
+    assert '"page": 4' not in prompt
+    assert '"page": 7' not in prompt
+    assert not any("生成页级检索规格" in prompt for prompt in calls)
+
+
+def test_enhanced_extraction_falls_back_to_bm25_after_tree_is_exhausted_and_dedupes(monkeypatch):
+    loaded_pages = []
+
+    async def fake_llm_acompletion(model, prompt):
+        if "定位最相关的页面" in prompt:
+            return '{"locations":[{"title":"付款","pages":[1],"reason":"tree hit"}]}'
+        if "生成页级检索规格" in prompt:
+            return '{"primary_queries":["付款比例"],"expanded_keywords":[]}'
+        if '"current_loaded_pages": [' in prompt:
+            if '"page": 1' in prompt and '"page": 2' not in prompt:
+                loaded_pages.append(1)
+                return '{"status":"not_found","value":"","evidence":"","pages":[1],"confidence":"Low","reason":"tree page no value"}'
+            loaded_pages.append(2)
+            return '{"status":"found","value":"30%","evidence":"付款比例为30%。","pages":[2],"confidence":"High","reason":null}'
+        raise AssertionError(prompt)
+
+    monkeypatch.setattr("pageindex.contract_extraction.llm_acompletion", fake_llm_acompletion)
+    client = EnhancedStubClient(
+        pages=[
+            {"page": 1, "content": "付款比例标题但没有具体值。"},
+            {"page": 2, "content": "付款比例为30%。"},
+        ],
+        structure=[{"title": "付款", "start_page": 1, "end_page": 2, "nodes": []}],
+        extract_batch_page_limit=1,
+        vector_enabled=False,
+    )
+
+    result = extract_contract_fields(
+        client,
+        "doc-demo",
+        [{"name": "payment_ratio", "description": "付款比例"}],
+        include_retrieval_metadata=True,
+    )["payment_ratio"]
+
+    assert result["status"] == "found"
+    assert result["pages"] == [2]
+    assert loaded_pages == [1, 2]
+
+
+def test_bm25_fallback_filters_tree_pages_before_selected_limit(monkeypatch):
+    loaded_pages = []
+
+    async def fake_llm_acompletion(model, prompt):
+        if "定位最相关的页面" in prompt:
+            return '{"locations":[{"title":"付款","pages":[1],"reason":"tree hit"}]}'
+        if "生成页级检索规格" in prompt:
+            return '{"primary_queries":["付款比例"],"expanded_keywords":[]}'
+        if '"current_loaded_pages": [' in prompt:
+            if '"page": 1' in prompt and '"page": 2' not in prompt:
+                loaded_pages.append(1)
+                return '{"status":"not_found","value":"","evidence":"","pages":[1],"confidence":"Low","reason":"tree page no value"}'
+            loaded_pages.append(2)
+            return '{"status":"found","value":"30%","evidence":"付款比例为30%。","pages":[2],"confidence":"High","reason":null}'
+        raise AssertionError(prompt)
+
+    def fake_retrieve_bm25_candidates(*args, **kwargs):
+        return [
+            {"page": 1, "sources": ["bm25_primary"], "bm25_score": 2.0, "read_status": "pending"},
+            {"page": 2, "sources": ["bm25_primary"], "bm25_score": 1.0, "read_status": "pending"},
+        ]
+
+    monkeypatch.setattr("pageindex.contract_extraction.llm_acompletion", fake_llm_acompletion)
+    monkeypatch.setattr("pageindex.contract_extraction.retrieve_bm25_candidates", fake_retrieve_bm25_candidates)
+    client = EnhancedStubClient(
+        pages=[
+            {"page": 1, "content": "付款比例标题但没有具体值。"},
+            {"page": 2, "content": "付款比例为30%。"},
+        ],
+        structure=[{"title": "付款", "start_page": 1, "end_page": 2, "nodes": []}],
+        bm25_selected_page_limit=1,
+        extract_batch_page_limit=1,
+        vector_enabled=False,
+    )
+
+    result = extract_contract_fields(
+        client,
+        "doc-demo",
+        [{"name": "payment_ratio", "description": "付款比例"}],
+        include_retrieval_metadata=True,
+    )["payment_ratio"]
+
+    assert result["status"] == "found"
+    assert result["pages"] == [2]
+    assert loaded_pages == [1, 2]
+
+
+def test_vector_fallback_excludes_existing_candidate_pool_pages(monkeypatch):
+    observed_processed_pages = []
+
+    async def fake_llm_acompletion(model, prompt):
+        if "定位最相关的页面" in prompt:
+            return '{"locations":[]}'
+        if "生成页级检索规格" in prompt:
+            return '{"primary_queries":["付款比例"],"expanded_keywords":[]}'
+        if '"current_loaded_pages": [' in prompt:
+            return '{"status":"not_found","value":"","evidence":"","pages":[1],"confidence":"Low","reason":"bm25 no value"}'
+        raise AssertionError(prompt)
+
+    def fake_retrieve_bm25_candidates(*args, **kwargs):
+        return [{"page": 1, "sources": ["bm25_primary"], "bm25_score": 1.0, "read_status": "pending"}]
+
+    async def fake_retrieve_vector_candidates(**kwargs):
+        observed_processed_pages.append(set(kwargs["processed_pages"]))
+        return [{"page": 2, "sources": ["vector_fallback"], "read_status": "pending"}]
+
+    monkeypatch.setattr("pageindex.contract_extraction.llm_acompletion", fake_llm_acompletion)
+    monkeypatch.setattr("pageindex.contract_extraction.retrieve_bm25_candidates", fake_retrieve_bm25_candidates)
+    monkeypatch.setattr("pageindex.contract_extraction.retrieve_vector_candidates", fake_retrieve_vector_candidates)
+    client = EnhancedStubClient(
+        pages=[
+            {"page": 1, "content": "付款比例标题但没有具体值。"},
+            {"page": 2, "content": "付款比例为30%。"},
+        ],
+        structure=[{"title": "付款", "start_page": 1, "end_page": 2, "nodes": []}],
+        bm25_selected_page_limit=1,
+        extract_batch_page_limit=1,
+        vector_enabled=True,
+        vector_fallback_max_runs=1,
+    )
+
+    result = extract_contract_fields(
+        client,
+        "doc-demo",
+        [{"name": "payment_ratio", "description": "付款比例"}],
+        include_retrieval_metadata=True,
+    )["payment_ratio"]
+
+    assert observed_processed_pages == [{1}]
+    assert result["status"] == "not_found"
 
 
 def test_initial_candidate_pool_preserves_order_without_dropping_pages_for_batch_budget():
@@ -708,7 +1022,7 @@ def test_reference_requeues_previously_evaluated_long_page_as_existing_chunks(mo
 
     assert result["status"] == "found"
     assert result["pages"] == [1]
-    assert loaded_units == ["1-1", "1-2", "1-3", "2", "1-1", "1-2-repeat"]
+    assert loaded_units == ["1-1", "1-2", "1-3", "2", "1-1", "1-2-repeat", "1-3"]
     assert result["resolution_method"] == "reference_followup"
 
 
@@ -1120,7 +1434,7 @@ def test_enhanced_extraction_retries_model_result_using_unloaded_evidence_page(m
 
     assert result["pages"] == [1]
     assert result["value"] == "10%"
-    assert extraction_calls["count"] == 2
+    assert extraction_calls["count"] == 4
 
 
 def test_enhanced_extraction_error_does_not_trigger_vector_fallback(monkeypatch):

@@ -13,6 +13,7 @@ from .tree_utils import (
     format_structure,
     generate_doc_description,
     generate_node_summary,
+    normalize_tree_retrieval_segments,
     print_json,
     print_toc,
     structure_to_list,
@@ -1141,6 +1142,13 @@ async def md_to_tree_hybrid(
         full_markdown_text=markdown_content,
         first_page_leading_node=first_page_leading_node,
     )
+    normalize_tree_retrieval_segments(
+        tree_structure,
+        page_text_getter=lambda start, end: get_page_range_text(page_text_map, start, end),
+        max_pages_per_segment=5,
+        start_key="start_page",
+        end_key="end_page",
+    )
 
     if if_add_node_id == 'yes':
         write_node_id(tree_structure)
@@ -1160,7 +1168,12 @@ async def md_to_tree_hybrid(
     )
 
     print("Formatting hybrid tree structure...")
-    field_order = ['title', 'node_id', 'start_page', 'end_page', 'line_num', 'summary', 'prefix_summary', 'text', 'nodes']
+    field_order = [
+        'title', 'node_id', 'start_page', 'end_page', 'content_start_page', 'content_end_page',
+        'line_num', 'summary', 'prefix_summary', 'text', 'is_virtual_node', 'virtual_reason',
+        'parent_title', 'nodes',
+    ]
+    compact_field_order = [field for field in field_order if field != 'text']
     if if_add_node_summary == 'yes':
         tree_structure = format_structure(tree_structure, order=field_order)
         print("Generating summaries for hybrid nodes...")
@@ -1173,7 +1186,7 @@ async def md_to_tree_hybrid(
         if if_add_node_text == 'no':
             tree_structure = format_structure(
                 tree_structure,
-                order=['title', 'node_id', 'start_page', 'end_page', 'line_num', 'summary', 'prefix_summary', 'nodes'],
+                order=compact_field_order,
             )
 
         if if_add_doc_description == 'yes':
@@ -1192,7 +1205,7 @@ async def md_to_tree_hybrid(
         else:
             tree_structure = format_structure(
                 tree_structure,
-                order=['title', 'node_id', 'start_page', 'end_page', 'line_num', 'summary', 'prefix_summary', 'nodes'],
+                order=compact_field_order,
             )
 
     return {

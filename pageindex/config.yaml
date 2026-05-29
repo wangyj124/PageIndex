@@ -3,25 +3,41 @@ model: "openai/deepseek-v4-flash"
 retrieve_model: "openai/deepseek-v4-flash"  # defaults to `model` if not set
 long_context_model: "openai/deepseek-v4-flash"  # configure a model with sufficient context for full-document extraction
 toc_check_page_num: 20
+
+# Standard PDF tree construction: before retrieval-oriented splitting, very large
+# PDF nodes can be re-parsed with LLM-generated internal structure when both
+# thresholds below are exceeded.
 max_page_num_each_node: 10
 max_token_num_each_node: 20000
+
 if_add_node_id: "yes"
 if_add_node_summary: "yes"
 if_add_doc_description: "no"
 if_add_node_text: "no"
-summary_max_concurrency: 3
+summary_max_concurrency: 10
 
 # Contract field retrieval query generation
 retrieval_query_generation_enabled: true
 retrieval_primary_query_limit: 3
-retrieval_expanded_keyword_limit: 8
+retrieval_expanded_keyword_limit: 5
 retrieval_query_cache_enabled: true
 
-# Tree + BM25 retrieval
-tree_page_limit: 3
+# Retrieval-oriented tree locations
+# tree_location_limit: maximum number of tree locations the locator may return.
+# tree_location_page_limit: maximum pages per tree location. The same value is
+# used during tree construction to split oversized retrieval segments before
+# summary generation.
+tree_location_limit: 3
+tree_page_limit: 3  # Deprecated compatibility alias for tree_location_limit.
+tree_location_page_limit: 5
+
+# BM25 and extraction candidate budgets
+# bm25_selected_page_limit is applied after excluding pages already covered by
+# tree candidates. initial_candidate_page_limit bounds the non-tree candidate
+# pool assembled for BM25 fallback.
 bm25_primary_top_k: 10
 bm25_expanded_top_k: 20
-bm25_selected_page_limit: 6
+bm25_selected_page_limit: 5
 initial_candidate_page_limit: 9
 extract_batch_page_limit: 4
 initial_context_token_budget: 12000

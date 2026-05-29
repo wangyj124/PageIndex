@@ -227,6 +227,7 @@ def build_hybrid_tree_pipeline(
             "reconstructed_nodes": [],
             "tree": tree,
             "total_pages": derived_total_pages,
+            "page_text_map": page_text_map,
         }
 
     if progress_callback:
@@ -306,6 +307,7 @@ def build_hybrid_tree_pipeline(
         "reconstructed_nodes": reconstructed_nodes,
         "tree": tree,
         "total_pages": derived_total_pages,
+        "page_text_map": page_text_map,
     }
 
 

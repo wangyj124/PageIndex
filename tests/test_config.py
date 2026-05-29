@@ -10,6 +10,9 @@ def test_config_loader_merges_defaults():
     assert opt.embedding_model == "openai/bge-m3:latest"
     assert opt.embedding_batch_size == 64
     assert opt.embedding_request_token_budget == 8192
+    assert opt.tree_location_limit == 3
+    assert opt.tree_page_limit == 3
+    assert opt.tree_location_page_limit == 5
 
 
 def test_config_loader_accepts_long_context_model_override():

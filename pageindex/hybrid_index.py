@@ -8,7 +8,12 @@ from .markdown import (
     generate_summaries_for_structure_md,
     load_pdf_json_payload,
 )
-from .tree_utils import create_clean_structure_for_description, format_structure, generate_doc_description
+from .tree_utils import (
+    create_clean_structure_for_description,
+    format_structure,
+    generate_doc_description,
+    normalize_tree_retrieval_segments,
+)
 
 
 def require_opendataloader_pdf():
@@ -87,12 +92,53 @@ def finalize_hybrid_payload(
     source_path = Path(source_path)
     doc_name = source_path.stem
     tree_structure = rename_hybrid_intervals_to_pages(tree_result["tree"])
+    page_text_map = tree_result.get("page_text_map", {})
+    normalize_tree_retrieval_segments(
+        tree_structure,
+        page_text_getter=lambda start, end: "\n\n".join(
+            page_text_map.get(page, "").strip()
+            for page in range(start, end + 1)
+            if page_text_map.get(page, "").strip()
+        ),
+        max_pages_per_segment=getattr(opt, "tree_location_page_limit", 5),
+        start_key="start_page",
+        end_key="end_page",
+    )
     if opt.if_add_node_id != "yes":
         for node in tree_structure:
             node.pop("node_id", None)
 
-    with_node_id_order = ["title", "node_id", "start_page", "end_page", "line_num", "summary", "prefix_summary", "text", "nodes"]
-    without_node_id_order = ["title", "start_page", "end_page", "line_num", "summary", "prefix_summary", "text", "nodes"]
+    with_node_id_order = [
+        "title",
+        "node_id",
+        "start_page",
+        "end_page",
+        "content_start_page",
+        "content_end_page",
+        "line_num",
+        "summary",
+        "prefix_summary",
+        "text",
+        "is_virtual_node",
+        "virtual_reason",
+        "parent_title",
+        "nodes",
+    ]
+    without_node_id_order = [
+        "title",
+        "start_page",
+        "end_page",
+        "content_start_page",
+        "content_end_page",
+        "line_num",
+        "summary",
+        "prefix_summary",
+        "text",
+        "is_virtual_node",
+        "virtual_reason",
+        "parent_title",
+        "nodes",
+    ]
     full_field_order = with_node_id_order if opt.if_add_node_id == "yes" else without_node_id_order
     compact_field_order = [field for field in full_field_order if field != "text"]
 

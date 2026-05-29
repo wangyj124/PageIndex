@@ -9,7 +9,7 @@ import re
 from ..config import ConfigLoader
 from ..llm import count_tokens, extract_json, llm_acompletion, llm_completion
 from ..logging_utils import JsonLogger
-from ..pdf import BytesIO, get_page_tokens, get_pdf_name
+from ..pdf import BytesIO, get_page_tokens, get_pdf_name, get_text_of_pdf_pages
 from ..tree_utils import (
     add_node_text,
     add_preface_if_needed,
@@ -19,6 +19,7 @@ from ..tree_utils import (
     format_structure,
     generate_doc_description,
     generate_summaries_for_structure,
+    normalize_tree_retrieval_segments,
     post_processing,
     remove_structure_text,
     write_node_id,
@@ -1097,6 +1098,13 @@ def page_index_main(doc, opt=None):
 
     async def page_index_builder():
         structure = await tree_parser(page_list, opt, doc=doc, logger=logger)
+        normalize_tree_retrieval_segments(
+            structure,
+            page_text_getter=lambda start, end: get_text_of_pdf_pages(page_list, start, end),
+            max_pages_per_segment=getattr(opt, "tree_location_page_limit", 5),
+            start_key="start_index",
+            end_key="end_index",
+        )
         if opt.if_add_node_id == 'yes':
             write_node_id(structure)    
         if opt.if_add_node_text == 'yes':
@@ -1111,13 +1119,27 @@ def page_index_main(doc, opt=None):
                 # Create a clean structure without unnecessary fields for description generation
                 clean_structure = create_clean_structure_for_description(structure)
                 doc_description = generate_doc_description(clean_structure, model=opt.model)
-                structure = format_structure(structure, order=['title', 'node_id', 'start_index', 'end_index', 'summary', 'text', 'nodes'])
+                structure = format_structure(
+                    structure,
+                    order=[
+                        'title', 'node_id', 'start_index', 'end_index', 'content_start_index',
+                        'content_end_index', 'summary', 'text', 'is_virtual_node', 'virtual_reason',
+                        'parent_title', 'nodes',
+                    ],
+                )
                 return {
                     'doc_name': get_pdf_name(doc),
                     'doc_description': doc_description,
                     'structure': structure,
                 }
-        structure = format_structure(structure, order=['title', 'node_id', 'start_index', 'end_index', 'summary', 'text', 'nodes'])
+        structure = format_structure(
+            structure,
+            order=[
+                'title', 'node_id', 'start_index', 'end_index', 'content_start_index',
+                'content_end_index', 'summary', 'text', 'is_virtual_node', 'virtual_reason',
+                'parent_title', 'nodes',
+            ],
+        )
         return {
             'doc_name': get_pdf_name(doc),
             'structure': structure,
