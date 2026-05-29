@@ -84,6 +84,20 @@ def _normalize_to_extraction_schema(schema: dict[str, Any] | list[dict[str, Any]
     return {"fields": fields}
 
 
+def _resolve_field_instruction(name: str, description: str, field_type: Any, required: bool, instruction: str) -> str:
+    return normalize_schema(
+        [
+            {
+                "name": name,
+                "description": description,
+                "type": str(field_type or "string"),
+                "required": required,
+                "instruction": instruction,
+            }
+        ]
+    )[0].instruction
+
+
 def _validate_extraction_result(
     schema: dict[str, Any] | list[dict[str, Any]],
     extraction_result: dict[str, Any],
@@ -118,16 +132,25 @@ def _inject_evidence_to_schema(original_schema: dict[str, Any]) -> dict[str, Any
 
     schema_with_evidence = deepcopy(original_schema)
     new_properties: dict[str, Any] = {}
+    required_fields = set(schema_with_evidence.get("required", []))
 
     for field_name, field_schema in schema_with_evidence["properties"].items():
         field_schema = field_schema if isinstance(field_schema, dict) else {}
         value_type = field_schema.get("type", "string")
         value_description = str(field_schema.get("description", "")).strip() or f"字段“{field_name}”的值"
         instruction = str(field_schema.get("instruction", "") or "").strip()
+        resolved_instruction = _resolve_field_instruction(
+            str(field_name),
+            value_description,
+            value_type,
+            field_name in required_fields,
+            instruction,
+        )
 
         new_properties[field_name] = {
             "type": "object",
-            "instruction": instruction,
+            "description": value_description,
+            "instruction": resolved_instruction,
             "properties": {
                 "value": {
                     "type": value_type,

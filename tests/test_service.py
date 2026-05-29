@@ -425,6 +425,81 @@ def test_extract_dynamic_schema_injects_evidence_and_reformats_output(monkeypatc
     assert payload["extraction_result"]["amount"]["evidence_chain"][0]["role"] == "reference_source"
 
 
+def test_extract_dynamic_schema_evidence_result_uses_config_instruction_for_json_schema(monkeypatch, tmp_path):
+    output_dir = tmp_path / "output"
+    workspace_dir = tmp_path / "workspace"
+    captured = {}
+    json_schema = {
+        "type": "object",
+        "properties": {
+            "party_a": {"type": "string", "description": "初步验收证书"},
+            "party_b": {"type": "string", "description": "质保期"},
+        },
+    }
+
+    class DummyClient:
+        def __init__(self, workspace):
+            self.workspace = workspace
+
+        def get_tree_id(self, doc_id):
+            return "tree-demo"
+
+        def get_document_structure(self, doc_id):
+            return "[]"
+
+    def fake_extract(
+        client,
+        doc_id,
+        input_schema,
+        max_concurrency=8,
+        progress_callback=None,
+        include_retrieval_metadata=False,
+        retrieval_logger=None,
+        long_context_mode=False,
+    ):
+        captured["extract_schema"] = input_schema
+        return {
+            "party_a": {
+                "status": "found",
+                "value": "初步验收证书条款",
+                "evidence": "初步验收证书条款",
+                "pages": [26],
+                "confidence": "High",
+                "reason": None,
+            },
+            "party_b": {
+                "status": "found",
+                "value": "质保期条款",
+                "evidence": "质保期条款",
+                "pages": [29],
+                "confidence": "High",
+                "reason": None,
+            },
+        }
+
+    monkeypatch.setattr(service, "PageIndexClient", DummyClient)
+    monkeypatch.setattr(service, "extract_contract_fields", fake_extract)
+
+    result = service.extract_dynamic_schema(
+        doc_id="doc-demo",
+        schema=json_schema,
+        output_dir=str(output_dir),
+        workspace_dir=str(workspace_dir),
+        require_evidence=True,
+    )
+
+    payload = json.loads(Path(result["output_path"]).read_text(encoding="utf-8"))
+
+    party_a_instruction = payload["extraction_result"]["party_a"]["instruction"]
+    party_b_instruction = payload["extraction_result"]["party_b"]["instruction"]
+    assert "提取初步验收证书签发条件" in party_a_instruction
+    assert "提取合同中质保期定义" in party_b_instruction
+    assert "value、page_number、section_title、original_quote" in party_a_instruction
+    assert "value、page_number、section_title、original_quote" in party_b_instruction
+    assert "提取初步验收证书签发条件" in captured["extract_schema"]["fields"][0]["instruction"]
+    assert "提取合同中质保期定义" in captured["extract_schema"]["fields"][1]["instruction"]
+
+
 def test_extract_dynamic_schema_long_context_preserves_evidence_shape_without_reading_tree(monkeypatch, tmp_path):
     captured = {}
     json_schema = {
