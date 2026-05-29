@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import importlib
+import os
 import platform
-import shutil
-import subprocess
+import uuid
 from pathlib import Path
+from urllib import error as urlerror
+from urllib import request as urlrequest
 
 from .config import *
 from .llm import *
@@ -15,6 +17,10 @@ from .tree_utils import *
 
 WORD_FILE_SUFFIXES = {".doc", ".docx"}
 WORD_TO_PDF_FORMAT = 17
+DEFAULT_WORD_TO_PDF_CONVERT_URL = "http://10.8.2.63:8000/convert"
+WORD_TO_PDF_CONVERT_URL_ENV = "PAGEINDEX_WORD_TO_PDF_CONVERT_URL"
+WORD_TO_PDF_CONVERT_TIMEOUT_ENV = "PAGEINDEX_WORD_TO_PDF_CONVERT_TIMEOUT"
+DEFAULT_WORD_TO_PDF_CONVERT_TIMEOUT = 120
 
 
 def _convert_word_to_pdf_windows(word_file: Path, output_pdf_path: Path) -> Path:
@@ -59,50 +65,69 @@ def _convert_word_to_pdf_windows(word_file: Path, output_pdf_path: Path) -> Path
 
 
 def _convert_word_to_pdf_linux(word_file: Path, output_dir_path: Path, output_pdf_path: Path) -> Path:
-    libreoffice_binary = shutil.which("libreoffice") or shutil.which("soffice")
-    if not libreoffice_binary:
-        raise RuntimeError(
-            "当前为 Linux 环境，但未找到 LibreOffice。请先安装 LibreOffice，并确保 `libreoffice --headless` 可用。"
-        )
-
-    command = [
-        libreoffice_binary,
-        "--headless",
-        "--convert-to",
-        "pdf",
-        "--outdir",
-        str(output_dir_path),
-        str(word_file),
-    ]
+    endpoint = os.getenv(WORD_TO_PDF_CONVERT_URL_ENV, DEFAULT_WORD_TO_PDF_CONVERT_URL).strip()
+    if not endpoint:
+        raise RuntimeError(f"Linux Word 转 PDF 远程服务地址为空，请配置 {WORD_TO_PDF_CONVERT_URL_ENV}")
 
     try:
-        completed = subprocess.run(
-            command,
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-    except FileNotFoundError as exc:
-        raise RuntimeError(
-            "当前为 Linux 环境，但无法执行 LibreOffice。请确认已正确安装并加入 PATH。"
-        ) from exc
-    except subprocess.CalledProcessError as exc:
-        details = (exc.stderr or exc.stdout or "").strip()
-        message = "使用 LibreOffice 转换 PDF 失败"
+        timeout = float(os.getenv(WORD_TO_PDF_CONVERT_TIMEOUT_ENV, str(DEFAULT_WORD_TO_PDF_CONVERT_TIMEOUT)))
+    except ValueError as exc:
+        raise RuntimeError(f"{WORD_TO_PDF_CONVERT_TIMEOUT_ENV} 必须是数字秒数") from exc
+
+    boundary = f"----PageIndexWordToPdf{uuid.uuid4().hex}"
+    file_bytes = word_file.read_bytes()
+    content_type = (
+        "application/msword"
+        if word_file.suffix.lower() == ".doc"
+        else "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    )
+    body = b"".join(
+        [
+            f"--{boundary}\r\n".encode("utf-8"),
+            (
+                f'Content-Disposition: form-data; name="file"; filename="{word_file.name}"\r\n'
+                f"Content-Type: {content_type}\r\n\r\n"
+            ).encode("utf-8"),
+            file_bytes,
+            b"\r\n",
+            f"--{boundary}--\r\n".encode("utf-8"),
+        ]
+    )
+    request = urlrequest.Request(
+        endpoint,
+        data=body,
+        method="POST",
+        headers={
+            "Content-Type": f"multipart/form-data; boundary={boundary}",
+            "Content-Length": str(len(body)),
+        },
+    )
+
+    try:
+        with urlrequest.urlopen(request, timeout=timeout) as response:
+            status = getattr(response, "status", response.getcode())
+            response_body = response.read()
+    except urlerror.HTTPError as exc:
+        details = exc.read().decode("utf-8", errors="ignore").strip()
+        message = f"远程 Word 转 PDF 服务返回 HTTP {exc.code}"
         if details:
             message = f"{message}: {details}"
         raise RuntimeError(message) from exc
+    except urlerror.URLError as exc:
+        raise RuntimeError(f"无法连接远程 Word 转 PDF 服务 {endpoint}: {exc.reason}") from exc
 
+    if status < 200 or status >= 300:
+        raise RuntimeError(f"远程 Word 转 PDF 服务返回异常状态码: {status}")
+
+    if not response_body.startswith(b"%PDF"):
+        preview = response_body[:200].decode("utf-8", errors="ignore").strip()
+        raise RuntimeError(f"远程 Word 转 PDF 服务未返回 PDF 内容: {preview}")
+
+    if output_pdf_path.exists():
+        output_pdf_path.unlink()
+    output_pdf_path.write_bytes(response_body)
     if not output_pdf_path.is_file():
-        output_message = " ".join(
-            part.strip()
-            for part in (completed.stdout, completed.stderr)
-            if isinstance(part, str) and part.strip()
-        )
-        message = f"LibreOffice 已执行，但未生成预期的 PDF 文件: {output_pdf_path}"
-        if output_message:
-            message = f"{message}。命令输出: {output_message}"
-        raise RuntimeError(message)
+        raise RuntimeError(f"远程 Word 转 PDF 服务已返回内容，但未写入预期 PDF 文件: {output_pdf_path}")
 
     return output_pdf_path.resolve()
 
@@ -139,7 +164,7 @@ def convert_word_to_pdf(word_path: str, output_dir: str) -> str:
             backend = "microsoft_word"
         elif system_name == "Linux":
             converted_path = _convert_word_to_pdf_linux(word_file, output_dir_path, output_pdf_path)
-            backend = "libreoffice"
+            backend = "remote_word_api"
         else:
             raise RuntimeError(
                 f"当前操作系统 {system_name} 暂不支持 Word 转 PDF，仅支持 Windows 和 Linux。"

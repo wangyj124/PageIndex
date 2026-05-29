@@ -1,5 +1,3 @@
-from types import SimpleNamespace
-
 import pytest
 
 import pageindex.utils as utils
@@ -21,53 +19,64 @@ class DummyLogger:
         self.events.append(("exception", message))
 
 
-def test_convert_word_to_pdf_uses_libreoffice_on_linux(monkeypatch, tmp_path):
+class DummyResponse:
+    status = 200
+
+    def __init__(self, payload=b"%PDF-1.4\nremote\n"):
+        self.payload = payload
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, traceback):
+        return False
+
+    def read(self):
+        return self.payload
+
+    def getcode(self):
+        return self.status
+
+
+def test_convert_word_to_pdf_uses_remote_api_on_linux(monkeypatch, tmp_path):
     word_path = tmp_path / "contract.docx"
     word_path.write_bytes(b"word-content")
     output_dir = tmp_path / "output"
     captured = {}
 
-    def fake_run(command, check, capture_output, text):
-        captured["command"] = command
-        captured["check"] = check
-        captured["capture_output"] = capture_output
-        captured["text"] = text
-        generated_pdf = output_dir / "contract.pdf"
-        generated_pdf.parent.mkdir(parents=True, exist_ok=True)
-        generated_pdf.write_bytes(b"%PDF-1.4\nlinux\n")
-        return SimpleNamespace(stdout="convert ok", stderr="")
+    def fake_urlopen(request, timeout):
+        captured["url"] = request.full_url
+        captured["timeout"] = timeout
+        captured["content_type"] = request.headers["Content-type"]
+        captured["body"] = request.data
+        return DummyResponse()
 
     monkeypatch.setattr(utils, "JsonLogger", DummyLogger)
     monkeypatch.setattr(utils.platform, "system", lambda: "Linux")
-    monkeypatch.setattr(utils.shutil, "which", lambda name: "/usr/bin/libreoffice" if name == "libreoffice" else None)
-    monkeypatch.setattr(utils.subprocess, "run", fake_run)
+    monkeypatch.setenv(utils.WORD_TO_PDF_CONVERT_URL_ENV, "http://convert.example/convert")
+    monkeypatch.setenv(utils.WORD_TO_PDF_CONVERT_TIMEOUT_ENV, "12.5")
+    monkeypatch.setattr(utils.urlrequest, "urlopen", fake_urlopen)
 
     result = utils.convert_word_to_pdf(str(word_path), str(output_dir))
 
     assert result == str((output_dir / "contract.pdf").resolve())
-    assert captured["command"] == [
-        "/usr/bin/libreoffice",
-        "--headless",
-        "--convert-to",
-        "pdf",
-        "--outdir",
-        str(output_dir.resolve()),
-        str(word_path.resolve()),
-    ]
-    assert captured["check"] is True
-    assert captured["capture_output"] is True
-    assert captured["text"] is True
+    assert (output_dir / "contract.pdf").read_bytes() == b"%PDF-1.4\nremote\n"
+    assert captured["url"] == "http://convert.example/convert"
+    assert captured["timeout"] == 12.5
+    assert captured["content_type"].startswith("multipart/form-data; boundary=")
+    assert b'name="file"; filename="contract.docx"' in captured["body"]
+    assert b"word-content" in captured["body"]
 
 
-def test_convert_word_to_pdf_raises_friendly_error_when_libreoffice_missing(monkeypatch, tmp_path):
+def test_convert_word_to_pdf_raises_friendly_error_when_remote_api_returns_non_pdf(monkeypatch, tmp_path):
     word_path = tmp_path / "contract.doc"
     word_path.write_bytes(b"word-content")
 
     monkeypatch.setattr(utils, "JsonLogger", DummyLogger)
     monkeypatch.setattr(utils.platform, "system", lambda: "Linux")
-    monkeypatch.setattr(utils.shutil, "which", lambda name: None)
+    monkeypatch.setattr(utils.urlrequest, "urlopen", lambda request, timeout: DummyResponse(b'{"error":"failed"}'))
 
-    with pytest.raises(RuntimeError, match="LibreOffice"):
+    with pytest.raises(RuntimeError, match="未返回 PDF"):
         utils.convert_word_to_pdf(str(word_path), str(tmp_path / "output"))
 
 

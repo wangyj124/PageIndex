@@ -58,7 +58,7 @@
 - `.doc`
 - `.docx`
 
-如果上传 `.doc/.docx`，服务端会在后台先自动转换为 PDF，再基于转换后的 PDF 建树。
+如果上传 `.doc/.docx`，服务端会在后台先自动转换为 PDF，再基于转换后的 PDF 建树。Linux 部署时，Word 转 PDF 默认调用远程服务 `http://10.8.2.63:8000/convert`，可通过环境变量 `PAGEINDEX_WORD_TO_PDF_CONVERT_URL` 覆盖。
 
 ## 3. 接口总览
 
@@ -91,6 +91,12 @@
 2. 如果是 `.doc/.docx`，先转为 PDF
 3. 基于 PDF 构建文档树
 4. 将结果缓存到共享 `workspace`
+
+Linux 部署说明：
+
+- 默认转换接口：`http://10.8.2.63:8000/convert`
+- 覆盖转换接口：设置 `PAGEINDEX_WORD_TO_PDF_CONVERT_URL`
+- 覆盖请求超时：设置 `PAGEINDEX_WORD_TO_PDF_CONVERT_TIMEOUT`，单位秒，默认 `120`
 
 ### 4.2 请求参数
 

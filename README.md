@@ -60,7 +60,7 @@
 当前转换策略按操作系统区分：
 
 - Windows：通过 `pywin32` 调用本机 Microsoft Word 转 PDF
-- Linux：通过 `libreoffice --headless` 转 PDF
+- Linux：通过远程 Word 转 PDF HTTP 服务转换，默认地址为 `http://10.8.2.63:8000/convert`
 
 这意味着当前仓库已经从“仅面向 PDF”扩展到“面向 PDF + Word 文档”的接口与服务层输入能力。
 
@@ -148,7 +148,7 @@
 - Python 3.10 及以上
 - 建议使用虚拟环境
 - 需要可用的大模型 API Key
-- 如需处理 `.doc/.docx`，需要准备对应平台的 Word 转 PDF 运行环境
+- 如需处理 `.doc/.docx`，Windows 需要本机 Microsoft Word；Linux 需要能访问远程 Word 转 PDF 服务
 
 ### 2. 安装依赖
 
@@ -162,7 +162,9 @@ pip install -r requirements.txt
 
 - Windows 环境会自动安装 `pywin32`
 - `pywin32` 仅解决 COM 调用问题；实际转换 `.doc/.docx` 仍需要本机已安装 Microsoft Word
-- Linux 环境如需处理 `.doc/.docx`，需额外安装 LibreOffice，并确保 `libreoffice --headless` 或 `soffice` 可用
+- Linux 环境不再依赖 LibreOffice；默认调用 `http://10.8.2.63:8000/convert`
+- 如需切换转换服务地址，设置环境变量 `PAGEINDEX_WORD_TO_PDF_CONVERT_URL`
+- 如需调整转换超时时间，设置环境变量 `PAGEINDEX_WORD_TO_PDF_CONVERT_TIMEOUT`，单位为秒，默认 `120`
 
 如果需要启动 API 服务，建议额外安装：
 
@@ -231,7 +233,7 @@ print(result["doc_id"], result["tree_id"], result["source_file"])
 - 返回的 `source_file` 会指向最终用于建树的 PDF 文件
 - `output_dir` 会同时作为 Word 转 PDF 的输出目录，以及混合建树调试/中间产物目录
 - Windows 需要安装 Microsoft Word
-- Linux 需要安装 LibreOffice
+- Linux 需要可访问远程 Word 转 PDF 服务，默认 `http://10.8.2.63:8000/convert`
 - 当前 CLI 仍主要按 `--pdf_path` / `--md_path` 暴露入口
 - 如果通过 HTTP 集成，当前 API 也已经支持直接上传 `.doc/.docx`
 
@@ -626,6 +628,8 @@ CLI 默认输出一个 `*_structure.json` 文件，常见字段包括：
 - `word_document_converted`
 - `build_document_tree_completed`
 
+Linux 部署时，`word_document_converted` 对应的底层转换后端为远程 Word 转 PDF 服务；需要确保服务端可访问 `PAGEINDEX_WORD_TO_PDF_CONVERT_URL` 指向的 `/convert` 接口。
+
 如果输入源来自 API 上传的 `.doc/.docx`，整体流程与服务层一致：先落盘原始 Word 文件，再在后台转换为 PDF，最后对转换后的 PDF 建树。
 
 当前 `output_dir` 下常见可见内容包括：
@@ -691,7 +695,7 @@ CLI 默认输出一个 `*_structure.json` 文件，常见字段包括：
 - 当前服务端限制同时只能存在 1 个活跃任务
 - Word 转 PDF 的支持仅覆盖 Windows 和 Linux
 - Windows 依赖 `pywin32` + 本机 Microsoft Word
-- Linux 依赖 LibreOffice 可执行命令
+- Linux 依赖远程 Word 转 PDF HTTP 服务
 - 示例脚本默认依赖仓库内 `pdf/` 目录中的样例文件
 - 混合建树依赖 `opendataloader-pdf`
 - 白盒多 Agent 示例依赖额外的 `openai-agents`
