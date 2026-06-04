@@ -373,7 +373,7 @@ uvicorn api:app --reload
 - 成功响应统一为 HTTP `200`
 - 业务数据统一位于 `data` 字段
 - 常见错误也会保持同样的包裹结构，例如 `400/404/422/429/500`
-- 当前服务一次只处理一个活跃任务；如果已有 `pending` 或 `processing` 任务，新请求会收到 `429`
+- 当前服务一次只处理一个活跃任务；如果已有 `pending`、`downloading` 或 `processing` 任务，新请求会收到 `429`
 
 ### 2. 第一步：上传 PDF 并异步建树
 
@@ -403,6 +403,15 @@ curl -X POST "http://127.0.0.1:8000/api/v1/upload_and_build" ^
   -F "file=@docs/your_document.docx;type=application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 ```
 
+通过下载链接建树示例：
+
+```bash
+curl -X POST "http://127.0.0.1:8000/api/v1/upload_and_build_by_url" ^
+  -H "accept: application/json" ^
+  -H "Content-Type: application/json" ^
+  -d "{\"file_url\":\"http://10.67.75.54:8092/api/common/fileSystem/downloadFile?systemCode=ssmp&fileName=27f5078a-dbcc-43ea-9bfe-cdb990eeab29.pdf\"}"
+```
+
 返回示例：
 
 ```json
@@ -428,6 +437,7 @@ curl -X POST "http://127.0.0.1:8000/api/v1/upload_and_build" ^
 - 如果上传的是 PDF，`source_file` 通常就是原始 PDF 路径
 - 如果上传的是 `.doc/.docx`，`source_file` 通常会是转换后的 PDF 路径
 - `output_dir` 对应任务隔离目录下的输出路径，可用于查看日志、转换产物和抽取结果
+- URL 下载接口会先提交后台任务，后台任务再把文件保存到同一个任务隔离目录的 `input/` 下并复用建树流程；文件名优先取下载链接中的 `fileName` 参数。可通过 `PAGEINDEX_DOWNLOAD_TIMEOUT` 覆盖下载超时时间，单位秒，默认 `120`
 
 ### 3. 第二步：基于 `doc_id` 发起动态 schema 抽取
 
@@ -503,6 +513,7 @@ curl "http://127.0.0.1:8000/api/v1/task/b7c2f5c5f1f6496f9858a2dbe4b9b4e0"
 其中 `data.status` 的任务基础状态通常包含：
 
 - `pending`
+- `downloading`
 - `processing`
 - `completed`
 - `failed`

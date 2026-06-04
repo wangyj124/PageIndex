@@ -1,11 +1,16 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import uuid
 from datetime import datetime, timezone
+from email.message import Message
 from pathlib import Path
 from typing import Any, Optional
+from urllib.parse import ParseResult, parse_qs, unquote, urlparse
+from urllib.request import Request as UrlRequest
+from urllib.request import urlopen
 
 from fastapi import BackgroundTasks, FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.exceptions import RequestValidationError
@@ -25,6 +30,8 @@ API_SHARED_WORKSPACE = API_WORKSPACE / "workspace"
 COPY_CHUNK_SIZE = 1024 * 1024
 MAX_CONCURRENT_TASKS = 1
 SUPPORTED_UPLOAD_SUFFIXES = {".pdf", ".doc", ".docx"}
+ACTIVE_TASK_STATUSES = {"pending", "downloading", "processing"}
+DEFAULT_DOWNLOAD_TIMEOUT_SECONDS = 120.0
 
 UPLOAD_AND_BUILD_RESPONSE_EXAMPLE = {
     "code": 200,
@@ -32,6 +39,13 @@ UPLOAD_AND_BUILD_RESPONSE_EXAMPLE = {
     "data": {
         "task_id": "a39e1289415e4c838dff9d7146300da0",
     },
+}
+
+UPLOAD_BY_URL_REQUEST_EXAMPLE = {
+    "file_url": (
+        "http://10.67.75.54:8092/api/common/fileSystem/downloadFile"
+        "?systemCode=ssmp&fileName=27f5078a-dbcc-43ea-9bfe-cdb990eeab29.pdf"
+    ),
 }
 
 EXTRACTION_REQUEST_EXAMPLE = {
@@ -155,6 +169,12 @@ class StandardResponse(BaseModel):
     data: Optional[Any] = Field(default=None, description="响应数据负载")
 
 
+class UploadByUrlRequest(BaseModel):
+    model_config = ConfigDict(json_schema_extra={"example": UPLOAD_BY_URL_REQUEST_EXAMPLE})
+
+    file_url: str = Field(..., description="HTTP(S) 文件下载链接")
+
+
 class ExtractionRequest(BaseModel):
     model_config = ConfigDict(json_schema_extra={"example": EXTRACTION_REQUEST_EXAMPLE})
 
@@ -180,7 +200,7 @@ def _error_response(status_code: int, message: str, data: Any = None) -> JSONRes
 
 def check_system_capacity() -> None:
     """检查系统当前活跃任务数，超过容量时主动拒绝新任务。"""
-    active_task_count = sum(1 for task in task_store.values() if task.get("status") in {"pending", "processing"})
+    active_task_count = sum(1 for task in task_store.values() if task.get("status") in ACTIVE_TASK_STATUSES)
     if active_task_count >= MAX_CONCURRENT_TASKS:
         raise HTTPException(
             status_code=429,
@@ -197,6 +217,85 @@ def _build_task_dir(task_id: str) -> Path:
     task_dir = API_TASKS_DIR / task_id
     task_dir.mkdir(parents=True, exist_ok=True)
     return task_dir
+
+
+def _get_download_timeout() -> float:
+    raw_timeout = os.getenv("PAGEINDEX_DOWNLOAD_TIMEOUT", "").strip()
+    if not raw_timeout:
+        return DEFAULT_DOWNLOAD_TIMEOUT_SECONDS
+    try:
+        timeout = float(raw_timeout)
+    except ValueError:
+        return DEFAULT_DOWNLOAD_TIMEOUT_SECONDS
+    return timeout if timeout > 0 else DEFAULT_DOWNLOAD_TIMEOUT_SECONDS
+
+
+def _validate_download_url(file_url: str) -> ParseResult:
+    parsed_url = urlparse(file_url)
+    if parsed_url.scheme not in {"http", "https"} or not parsed_url.netloc:
+        raise HTTPException(status_code=400, detail="仅支持 http:// 或 https:// 下载链接")
+    return parsed_url
+
+
+def _filename_from_content_disposition(content_disposition: str | None) -> str:
+    if not content_disposition:
+        return ""
+    message = Message()
+    message["content-disposition"] = content_disposition
+    return message.get_filename() or ""
+
+
+def _sanitize_download_filename(filename: str) -> str:
+    return Path(unquote(filename or "")).name
+
+
+def _ensure_supported_filename(filename: str) -> str:
+    sanitized_filename = _sanitize_download_filename(filename)
+    file_suffix = Path(sanitized_filename).suffix.lower()
+    if not sanitized_filename or file_suffix not in SUPPORTED_UPLOAD_SUFFIXES:
+        raise HTTPException(status_code=400, detail="仅支持上传 .pdf、.doc、.docx 文件")
+    return sanitized_filename
+
+
+def _resolve_url_filename(parsed_url: ParseResult, content_disposition: str | None = None) -> str:
+    query_params = parse_qs(parsed_url.query)
+    for candidate in (
+        query_params.get("fileName", [""])[0],
+        _filename_from_content_disposition(content_disposition),
+        Path(unquote(parsed_url.path)).name,
+    ):
+        sanitized_candidate = _sanitize_download_filename(candidate)
+        if sanitized_candidate:
+            return _ensure_supported_filename(sanitized_candidate)
+    raise HTTPException(status_code=400, detail="仅支持上传 .pdf、.doc、.docx 文件")
+
+
+def _download_file_from_url(file_url: str, input_dir: Path) -> Path:
+    parsed_url = _validate_download_url(file_url)
+    filename_from_url = _resolve_url_filename(parsed_url) if parse_qs(parsed_url.query).get("fileName") else ""
+    request = UrlRequest(file_url, headers={"User-Agent": "PageIndex/0.1"})
+
+    try:
+        with urlopen(request, timeout=_get_download_timeout()) as response:
+            filename = filename_from_url or _resolve_url_filename(
+                parsed_url,
+                response.headers.get("Content-Disposition"),
+            )
+            saved_file_path = input_dir / filename
+            with saved_file_path.open("wb") as output_file:
+                shutil.copyfileobj(response, output_file, length=COPY_CHUNK_SIZE)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"下载文件失败: {exc}") from exc
+
+    return saved_file_path
+
+
+def _validate_download_request(file_url: str) -> None:
+    parsed_url = _validate_download_url(file_url)
+    if parse_qs(parsed_url.query).get("fileName"):
+        _resolve_url_filename(parsed_url)
 
 
 def _count_schema_fields(schema: dict[str, Any]) -> int:
@@ -264,6 +363,50 @@ def _process_build_tree_task(task_id: str, file_path: str, task_dir: str) -> Non
         result_status=result.get("status", ""),
         **result_payload,
     )
+
+
+def _process_download_and_build_task(task_id: str, file_url: str, task_dir: str) -> None:
+    """
+    后台 URL 下载和建树任务。
+
+    下载使用阻塞 I/O，因此必须放在 FastAPI BackgroundTasks 的同步任务中执行。
+    """
+    task_root = Path(task_dir)
+    input_dir = task_root / "input"
+    input_dir.mkdir(parents=True, exist_ok=True)
+
+    _update_task(
+        task_id,
+        status="downloading",
+        download_started_at=_utcnow_iso(),
+    )
+
+    try:
+        saved_file_path = _download_file_from_url(file_url, input_dir)
+    except HTTPException as exc:
+        _update_task(
+            task_id,
+            status="failed",
+            error=str(exc.detail),
+            completed_at=_utcnow_iso(),
+        )
+        return
+    except Exception as exc:
+        _update_task(
+            task_id,
+            status="failed",
+            error=f"下载文件失败: {exc}",
+            completed_at=_utcnow_iso(),
+        )
+        return
+
+    _update_task(
+        task_id,
+        file_name=saved_file_path.name,
+        file_path=str(saved_file_path.resolve()),
+        download_completed_at=_utcnow_iso(),
+    )
+    _process_build_tree_task(task_id, str(saved_file_path), task_dir)
 
 
 def _process_extraction_task(
@@ -400,6 +543,60 @@ async def upload_and_build(
         _process_build_tree_task,
         task_id,
         str(saved_file_path),
+        str(task_dir),
+    )
+
+    return _success_response(
+        "文件已接收，建树任务已提交到后台。",
+        {"task_id": task_id},
+    )
+
+
+@app.post(
+    "/api/v1/upload_and_build_by_url",
+    response_model=StandardResponse,
+    responses={
+        200: {
+            "description": "文件下载成功，建树任务已进入后台队列。",
+            "content": {
+                "application/json": {
+                    "example": UPLOAD_AND_BUILD_RESPONSE_EXAMPLE,
+                }
+            },
+        }
+    },
+)
+async def upload_and_build_by_url(
+    request: UploadByUrlRequest,
+    background_tasks: BackgroundTasks,
+) -> StandardResponse:
+    """
+    根据 HTTP(S) 文件下载链接获取 PDF / Word 文件，并异步构建文档树。
+    """
+    check_system_capacity()
+    _validate_download_request(request.file_url)
+
+    task_id = uuid.uuid4().hex
+    task_dir = _build_task_dir(task_id)
+
+    _update_task(
+        task_id,
+        task_id=task_id,
+        task_type="build_tree",
+        status="pending",
+        file_name="",
+        file_path="",
+        source_url=request.file_url,
+        output_path="",
+        error="",
+        created_at=_utcnow_iso(),
+        workspace_dir=str(API_SHARED_WORKSPACE.resolve()),
+    )
+
+    background_tasks.add_task(
+        _process_download_and_build_task,
+        task_id,
+        request.file_url,
         str(task_dir),
     )
 

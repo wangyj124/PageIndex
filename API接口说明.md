@@ -46,6 +46,7 @@
 活跃任务定义：
 
 - `pending`
+- `downloading`
 - `processing`
 
 如果已有活跃任务，新请求会返回 `429`。
@@ -68,13 +69,19 @@
 - 路径：`/api/v1/upload_and_build`
 - Content-Type：`multipart/form-data`
 
-### 3.2 发起抽取
+### 3.2 通过下载链接建树
+
+- 方法：`POST`
+- 路径：`/api/v1/upload_and_build_by_url`
+- Content-Type：`application/json`
+
+### 3.3 发起抽取
 
 - 方法：`POST`
 - 路径：`/api/v1/extract`
 - Content-Type：`application/json`
 
-### 3.3 查询任务状态
+### 3.4 查询任务状态
 
 - 方法：`GET`
 - 路径：`/api/v1/task/{task_id}`
@@ -127,6 +134,23 @@ curl -X POST "http://10.67.75.27:8000/api/v1/upload_and_build" ^
   -H "accept: application/json" ^
   -F "file=@docs/your_document.docx;type=application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 ```
+
+通过下载链接建树：
+
+```bash
+curl -X POST "http://10.67.75.27:8000/api/v1/upload_and_build_by_url" ^
+  -H "accept: application/json" ^
+  -H "Content-Type: application/json" ^
+  -d "{\"file_url\":\"http://10.67.75.54:8092/api/common/fileSystem/downloadFile?systemCode=ssmp&fileName=27f5078a-dbcc-43ea-9bfe-cdb990eeab29.pdf\"}"
+```
+
+下载链接说明：
+
+- 仅支持 `http://` 和 `https://`
+- 文件下载在后台任务中执行，下载后的文件同样写入任务目录 `artifacts/api_workspace/tasks/{task_id}/input/`
+- 文件名优先取 URL query 参数 `fileName`，其次取响应头 `Content-Disposition`，最后取 URL path basename
+- 支持后缀仍为 `.pdf`、`.doc`、`.docx`
+- 可通过 `PAGEINDEX_DOWNLOAD_TIMEOUT` 覆盖下载超时时间，单位秒，默认 `120`
 
 ### 4.4 成功返回示例
 
@@ -308,6 +332,7 @@ curl "http://10.67.75.27:8000/api/v1/task/b7c2f5c5f1f6496f9858a2dbe4b9b4e0"
 ### 6.4 任务状态枚举
 
 - `pending`：任务已接收，等待执行
+- `downloading`：URL 文件正在下载
 - `processing`：任务正在执行
 - `completed`：任务已完成
 - `failed`：任务执行失败

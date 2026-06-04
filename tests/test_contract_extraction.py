@@ -480,9 +480,29 @@ def test_query_cache_disabled_does_not_read_or_reuse_cached_spec(monkeypatch, tm
     assert _load_query_cache(client) == {}
     result = asyncio.run(_generate_query_spec(client, field, stale_memory_cache, retries=0, timeout_seconds=1))
 
-    assert result["primary_queries"] == ["新查询"]
+    assert result["primary_queries"] == ["合同总价", "新查询"]
     assert result["generation_source"] == "llm_generated"
     assert called["count"] == 1
+
+
+def test_generated_primary_queries_keep_description_first_and_fill_after_dedup(monkeypatch):
+    client = EnhancedStubClient(
+        pages=[],
+        structure=[],
+        retrieval_primary_query_limit=3,
+        retrieval_query_cache_enabled=False,
+    )
+    field = normalize_schema([{"name": "amount", "description": "合同总价"}])[0]
+
+    async def fake_llm_acompletion(model, prompt):
+        return '{"primary_queries":["合同总价","含税总价","合同金额"],"expanded_keywords":[]}'
+
+    monkeypatch.setattr("pageindex.contract_extraction.llm_acompletion", fake_llm_acompletion)
+
+    result = asyncio.run(_generate_query_spec(client, field, {}, retries=0, timeout_seconds=1))
+
+    assert result["primary_queries"] == ["合同总价", "含税总价", "合同金额"]
+    assert result["generation_source"] == "llm_generated"
 
 
 def test_query_cache_hit_is_normalized_to_current_limits_and_key_includes_limits(monkeypatch):
@@ -513,7 +533,7 @@ def test_query_cache_hit_is_normalized_to_current_limits_and_key_includes_limits
     )
 
     assert result == {
-        "primary_queries": ["总价"],
+        "primary_queries": ["合同总价"],
         "expanded_keywords": ["价款"],
         "generation_source": "cache_hit",
     }

@@ -570,6 +570,21 @@ def _string_list(value, limit):
     return result
 
 
+def _primary_queries_with_description(field, raw_queries, limit):
+    description = str(field.description or "").strip()
+    if limit <= 0:
+        return []
+    queries = [description] if description else []
+    for query in _string_list(raw_queries, limit):
+        if len(queries) >= limit:
+            break
+        if query not in queries:
+            queries.append(query)
+        if len(queries) >= limit:
+            break
+    return queries
+
+
 async def _generate_query_spec(client, field, query_cache, retries, timeout_seconds):
     default_spec = {"primary_queries": [field.description], "expanded_keywords": []}
     if not _setting(client, "retrieval_query_generation_enabled", True):
@@ -582,7 +597,12 @@ async def _generate_query_spec(client, field, query_cache, retries, timeout_seco
         logger.debug("Retrieval query cache hit for field=%s", field.name)
         cached = query_cache[key]
         return {
-            "primary_queries": _string_list(cached.get("primary_queries"), primary_limit) or [field.description],
+            "primary_queries": _primary_queries_with_description(
+                field,
+                cached.get("primary_queries"),
+                primary_limit,
+            )
+            or [field.description],
             "expanded_keywords": _string_list(cached.get("expanded_keywords"), keyword_limit),
             "generation_source": "cache_hit",
         }
@@ -593,7 +613,9 @@ async def _generate_query_spec(client, field, query_cache, retries, timeout_seco
             retries=retries,
             timeout_seconds=timeout_seconds,
         )
-        primary_queries = _string_list(payload.get("primary_queries"), primary_limit) or [field.description]
+        primary_queries = _primary_queries_with_description(field, payload.get("primary_queries"), primary_limit) or [
+            field.description
+        ]
         expanded_keywords = _string_list(payload.get("expanded_keywords"), keyword_limit)
         result = {"primary_queries": primary_queries, "expanded_keywords": expanded_keywords}
         generation_source = "llm_generated"

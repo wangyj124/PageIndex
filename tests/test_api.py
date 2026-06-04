@@ -127,6 +127,117 @@ def test_upload_and_build_accepts_word_and_routes_to_service(monkeypatch):
         assert captured["output_dir"] == str(task_dir / "output")
 
 
+def test_upload_and_build_by_url_downloads_file_and_runs_background_task(monkeypatch):
+    captured = {}
+    file_url = (
+        "http://10.67.75.54:8092/api/common/fileSystem/downloadFile"
+        "?systemCode=ssmp&fileName=27f5078a-dbcc-43ea-9bfe-cdb990eeab29.pdf"
+    )
+
+    def fake_download_file_from_url(url, input_dir):
+        captured["download_url"] = url
+        input_dir.mkdir(parents=True, exist_ok=True)
+        saved_pdf = input_dir / "27f5078a-dbcc-43ea-9bfe-cdb990eeab29.pdf"
+        saved_pdf.write_bytes(b"%PDF-1.4\nurl-build-demo\n")
+        return saved_pdf
+
+    def fake_build_document_tree(
+        file_path,
+        output_dir,
+        workspace_dir="artifacts/workspace",
+        strategy="hybrid",
+    ):
+        captured["file_path"] = file_path
+        captured["output_dir"] = output_dir
+        captured["workspace_dir"] = workspace_dir
+        captured["strategy"] = strategy
+        return {
+            "status": "success",
+            "doc_id": "doc-build-url",
+            "tree_id": "tree-build-url",
+            "source_file": file_path,
+        }
+
+    monkeypatch.setattr(api, "_download_file_from_url", fake_download_file_from_url)
+    monkeypatch.setattr(api, "build_document_tree", fake_build_document_tree)
+
+    with TestClient(api.app) as client:
+        response = client.post(
+            "/api/v1/upload_and_build_by_url",
+            json={"file_url": file_url},
+        )
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["code"] == 200
+        assert body["message"] == "文件已接收，建树任务已提交到后台。"
+
+        task_id = body["data"]["task_id"]
+        task_info = api.task_store[task_id]
+        task_dir = api.API_TASKS_DIR / task_id
+        saved_pdf = task_dir / "input" / "27f5078a-dbcc-43ea-9bfe-cdb990eeab29.pdf"
+
+        assert captured["download_url"] == file_url
+        assert task_info["task_type"] == "build_tree"
+        assert task_info["status"] == "completed"
+        assert task_info["source_url"] == file_url
+        assert task_info["doc_id"] == "doc-build-url"
+        assert task_info["tree_id"] == "tree-build-url"
+        assert saved_pdf.read_bytes() == b"%PDF-1.4\nurl-build-demo\n"
+        assert captured["file_path"] == str(saved_pdf)
+        assert captured["workspace_dir"] == str(api.API_SHARED_WORKSPACE)
+        assert captured["output_dir"] == str(task_dir / "output")
+
+
+def test_upload_and_build_by_url_rejects_non_http_url():
+    with TestClient(api.app) as client:
+        response = client.post(
+            "/api/v1/upload_and_build_by_url",
+            json={"file_url": "file:///tmp/demo.pdf"},
+        )
+
+    assert response.status_code == 400
+    assert response.json() == {
+        "code": 400,
+        "message": "仅支持 http:// 或 https:// 下载链接",
+        "data": None,
+    }
+
+
+def test_upload_and_build_by_url_rejects_unsupported_file_type():
+    with TestClient(api.app) as client:
+        response = client.post(
+            "/api/v1/upload_and_build_by_url",
+            json={"file_url": "http://example.test/download?fileName=demo.txt"},
+        )
+
+    assert response.status_code == 400
+    assert response.json() == {
+        "code": 400,
+        "message": "仅支持上传 .pdf、.doc、.docx 文件",
+        "data": None,
+    }
+
+
+def test_upload_and_build_by_url_returns_wrapped_download_error(monkeypatch):
+    def fake_download_file_from_url(*args, **kwargs):
+        raise api.HTTPException(status_code=400, detail="下载文件失败: mock timeout")
+
+    monkeypatch.setattr(api, "_download_file_from_url", fake_download_file_from_url)
+
+    with TestClient(api.app) as client:
+        response = client.post(
+            "/api/v1/upload_and_build_by_url",
+            json={"file_url": "http://example.test/demo.pdf"},
+        )
+
+    assert response.status_code == 200
+    task_id = response.json()["data"]["task_id"]
+    task_info = api.task_store[task_id]
+    assert task_info["status"] == "failed"
+    assert task_info["error"] == "下载文件失败: mock timeout"
+
+
 def test_extract_runs_background_task_with_progress_and_evidence_flag(monkeypatch):
     captured = {}
 
@@ -339,6 +450,26 @@ def test_upload_and_build_returns_429_when_capacity_is_full():
     }
 
 
+def test_upload_and_build_by_url_returns_429_when_download_is_active():
+    api.task_store["downloading-task"] = {
+        "task_id": "downloading-task",
+        "status": "downloading",
+    }
+
+    with TestClient(api.app) as client:
+        response = client.post(
+            "/api/v1/upload_and_build_by_url",
+            json={"file_url": "http://example.test/demo.pdf"},
+        )
+
+    assert response.status_code == 429
+    assert response.json() == {
+        "code": 429,
+        "message": "系统当前正忙，一次只能处理一个任务，请稍后再试",
+        "data": None,
+    }
+
+
 def test_extract_returns_wrapped_validation_error():
     with TestClient(api.app) as client:
         response = client.post(
@@ -360,6 +491,10 @@ def test_openapi_uses_realistic_swagger_examples():
         "application/json"
     ]["example"]
     assert upload_example["data"]["task_id"] == "a39e1289415e4c838dff9d7146300da0"
+
+    upload_by_url_example = schema["components"]["schemas"]["UploadByUrlRequest"]["example"]
+    assert "fileName=27f5078a-dbcc-43ea-9bfe-cdb990eeab29.pdf" in upload_by_url_example["file_url"]
+    assert "/api/v1/upload_and_build_by_url" in schema["paths"]
 
     extraction_request_example = schema["components"]["schemas"]["ExtractionRequest"]["example"]
     assert extraction_request_example["doc_id"] == "doc_1079388f5212c5d90f705bac4a6ad9612ff5d6cfa284802084d2ddb7d8544fab"
