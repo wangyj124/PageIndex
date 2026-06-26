@@ -1,48 +1,93 @@
 {
   "fields": [
     {
+      "name": "project_name",
+      "label_cn": "项目名称",
+      "focus_cn": "合同基础信息",
+      "description": "为合同所服务的项目名称，一般出现在合同名称、合同目的等位置，如“xxxx合同”或“合同目的是为xxx项目提供设备”等。",
+      "type": "string",
+      "required": false,
+      "value_return_mode": "key_info",
+      "instruction": ""
+    },
+    {
+      "name": "unit_configuration",
+      "label_cn": "机组配置",
+      "focus_cn": "合同基础信息",
+      "description": "为合同涉及的机组设备，一般出现在合同设备中。",
+      "type": "string",
+      "required": false,
+      "value_return_mode": "key_info",
+      "instruction": ""
+    },
+    {
+      "name": "customer_name",
+      "label_cn": "客户名称",
+      "focus_cn": "合同基础信息",
+      "description": "即甲方或买方名称。",
+      "type": "string",
+      "required": false,
+      "value_return_mode": "key_info",
+      "instruction": ""
+    },
+    {
       "name": "contract_total_price",
       "label_cn": "合同总价",
       "focus_cn": "合同价格",
-      "description": "提取‘合同价格-合同总价’相关合同约定/金额/条件",
+      "description": "常在合同价格及价格相关附件中提及。",
       "type": "string",
       "required": false,
+      "value_return_mode": "key_info",
       "instruction": ""
     },
     {
       "name": "equipment_total_price",
       "label_cn": "设备总价",
       "focus_cn": "合同价格",
-      "description": "提取‘合同价格-设备总价’相关合同约定/金额/条件",
+      "description": "常在合同价格及价格相关附件中提及。",
       "type": "string",
       "required": false,
+      "value_return_mode": "key_info",
       "instruction": ""
     },
     {
       "name": "pricing_technical_service_fee",
       "label_cn": "技术服务费",
       "focus_cn": "合同价格",
-      "description": "提取‘合同价格-技术服务费’相关合同约定/金额/条件",
+      "description": "常在合同价格及价格相关附件中提及。",
       "type": "string",
       "required": false,
+      "value_return_mode": "key_info",
       "instruction": "固定价格、封顶价格、据实结算？"
     },
     {
       "name": "overseas_training_and_design_liaison_fee",
       "label_cn": "国外技术培训、设联会费",
       "focus_cn": "合同价格",
-      "description": "提取‘合同价格-国外技术培训、设联会费’相关合同约定/金额/条件",
+      "description": "常在合同价格及价格相关附件中提及。",
       "type": "string",
       "required": false,
+      "value_return_mode": "key_info",
+      "instruction": ""
+    },
+    {
+      "name": "provisional_amount",
+      "label_cn": "暂定金额",
+      "focus_cn": "合同价格",
+      "description": "常在合同价格及价格相关附件中提及。",
+      "type": "string",
+      "required": false,
+      "value_return_mode": "key_info",
       "instruction": ""
     },
     {
       "name": "misc_freight_and_insurance_fee",
       "label_cn": "杂运费（含保险费）",
       "focus_cn": "合同价格",
-      "description": "提取‘合同价格-杂运费（含保险费）’相关合同约定/金额/条件",
+      "description": "一般指运保费，常在合同价格及价格相关附件中提及。",
       "type": "string",
       "required": false,
+      "value_return_mode": "key_info",
       "instruction": ""
     },
     {

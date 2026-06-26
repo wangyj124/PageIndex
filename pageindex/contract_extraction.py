@@ -20,6 +20,9 @@ logger = logging.getLogger(__name__)
 QUERY_SPEC_PROMPT_VERSION = "v2"
 FIELD_INSTRUCTIONS_PATH = Path(__file__).parent / "field_instructions.yaml"
 _FIELD_INSTRUCTION_CACHE = None
+VALUE_RETURN_MODE_FULL_CLAUSE = "full_clause"
+VALUE_RETURN_MODE_KEY_INFO = "key_info"
+VALUE_RETURN_MODES = {VALUE_RETURN_MODE_FULL_CLAUSE, VALUE_RETURN_MODE_KEY_INFO}
 
 
 class ConfidenceLevel(str, Enum):
@@ -42,6 +45,14 @@ class FieldSpec:
     type: str = "string"
     required: bool = False
     instruction: str = ""
+    value_return_mode: str = VALUE_RETURN_MODE_FULL_CLAUSE
+
+
+def _normalize_value_return_mode(value):
+    mode = str(value or VALUE_RETURN_MODE_FULL_CLAUSE).strip() or VALUE_RETURN_MODE_FULL_CLAUSE
+    if mode not in VALUE_RETURN_MODES:
+        raise ValueError(f"unsupported value_return_mode: {mode!r}")
+    return mode
 
 
 def _normalize_field_instruction_key(value):
@@ -100,6 +111,7 @@ def normalize_schema(schema):
                 type=str(item.get("type", "string")).strip() or "string",
                 required=bool(item.get("required", False)),
                 instruction=instruction,
+                value_return_mode=_normalize_value_return_mode(item.get("value_return_mode")),
             )
         )
     return fields
@@ -359,7 +371,31 @@ def _build_locator_prompt(field, structure_digest, location_limit=3, pages_per_l
 """.strip()
 
 
+def _value_return_rule_lines(field):
+    if field.value_return_mode == VALUE_RETURN_MODE_KEY_INFO:
+        return [
+            "  - value 必须只返回该字段对应的关键信息，例如项目名称、客户名称、机组配置、金额或费用项；不要返回完整合同条款全文。",
+            "  - 不要总结证据链，不要输出解释性文字，只输出字段本身的精炼结果。",
+        ]
+    return [
+        "  - value 必须是命中字段所在的完整合同条款原文，不要总结、改写或只返回字段值。",
+        "  - 如果命中内容位于某一编号条款、标题条款或条款项下的局部段落，必须扩展返回该条完整条款；如果多个条款共同支持结果，value 中逐条返回这些完整条款，并用换行分隔。",
+    ]
+
+
+def _value_return_rules(field):
+    return "\n".join(_value_return_rule_lines(field))
+
+
+def _example_value(field):
+    if field.value_return_mode == VALUE_RETURN_MODE_KEY_INFO:
+        return "人民币500万元"
+    return "第X条 完整合同条款原文……"
+
+
 def _build_extraction_prompt(field, extraction_context_json):
+    value_return_rules = _value_return_rules(field)
+    example_value = _example_value(field)
     return f"""
 请从提供的页面文本中准确抽取一个合同字段。
 
@@ -367,6 +403,7 @@ def _build_extraction_prompt(field, extraction_context_json):
 - description: {field.description}
 - type: {field.type}
 - required: {field.required}
+- value_return_mode: {field.value_return_mode}
 - instruction: {field.instruction or "无"}
 
 候选池与页面内容：
@@ -380,8 +417,7 @@ def _build_extraction_prompt(field, extraction_context_json):
 - 当前页没有最终值、但明确要求查看其他条款、附件或协议时，返回 "reference_found"，并提供 references。
 - 如果当前提供的多页中同时包含引用页和最终值页，应直接返回 "found"。
 - 如果 status 为 "found"：
-  - value 必须是命中字段所在的完整合同条款原文，不要总结、改写或只返回字段值。
-  - 如果命中内容位于某一编号条款、标题条款或条款项下的局部段落，必须扩展返回该条完整条款；如果多个条款共同支持结果，value 中逐条返回这些完整条款，并用换行分隔。
+{value_return_rules}
   - evidence 必须是支撑判断的核心原文片段，可使用省略号压缩上下文，例如“合同总价……人民币500万元……”，不要把完整条款全文放入 evidence。
   - pages 必须是物理页码数组
   - confidence 判定标准：
@@ -402,7 +438,7 @@ def _build_extraction_prompt(field, extraction_context_json):
 返回 JSON，格式如下：
 {{
   "status": "found",
-  "value": "第X条 完整合同条款原文……",
+  "value": "{example_value}",
   "evidence": "核心原文……可省略中间内容……",
   "pages": [4],
   "confidence": "High",
@@ -412,6 +448,8 @@ def _build_extraction_prompt(field, extraction_context_json):
 
 
 def _build_long_context_extraction_prompt(field, pages_json):
+    value_return_rules = _value_return_rules(field)
+    example_value = _example_value(field)
     return f"""
 请从完整文档的分页原文中准确抽取一个合同字段。
 
@@ -419,6 +457,7 @@ def _build_long_context_extraction_prompt(field, pages_json):
 - description: {field.description}
 - type: {field.type}
 - required: {field.required}
+- value_return_mode: {field.value_return_mode}
 - instruction: {field.instruction or "无"}
 
 完整文档分页原文：
@@ -428,8 +467,8 @@ def _build_long_context_extraction_prompt(field, pages_json):
 - 只返回 JSON。
 - status 必须严格是以下之一："found"、"not_found"、"error"。
 - confidence 必须严格是以下之一："High"、"Medium"、"Low"。
-- 如果 status 为 "found"，value 必须是命中字段所在的完整合同条款原文，不要总结、改写或只返回字段值。
-- 如果命中内容位于某一编号条款、标题条款或条款项下的局部段落，必须扩展返回该条完整条款；如果多个条款共同支持结果，value 中逐条返回这些完整条款，并用换行分隔。
+- 如果 status 为 "found"：
+{value_return_rules}
 - evidence 必须是支撑判断的核心原文片段，可使用省略号压缩上下文，例如“合同总价……人民币500万元……”，不要把完整条款全文放入 evidence。
 - pages 必须是支撑条款所在的物理页码数组。
 - 如果 status 为 "not_found" 或 "error"，value 和 evidence 设为 ""，confidence 设为 "Low"，并提供非空 reason。
@@ -438,7 +477,7 @@ def _build_long_context_extraction_prompt(field, pages_json):
 返回 JSON，格式如下：
 {{
   "status": "found",
-  "value": "第X条 完整合同条款原文……",
+  "value": "{example_value}",
   "evidence": "核心原文……可省略中间内容……",
   "pages": [4],
   "confidence": "High",

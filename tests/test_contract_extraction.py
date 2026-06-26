@@ -73,6 +73,21 @@ def test_normalize_schema_accepts_fields_wrapper():
     )
     assert fields[0].name == "contract_amount"
     assert fields[0].required is True
+    assert fields[0].value_return_mode == "full_clause"
+
+
+def test_normalize_schema_preserves_value_return_mode():
+    fields = normalize_schema(
+        [
+            {
+                "name": "contract_total_price",
+                "description": "合同总价",
+                "value_return_mode": "key_info",
+            }
+        ]
+    )
+
+    assert fields[0].value_return_mode == "key_info"
 
 
 def test_normalize_schema_fills_instruction_from_description_config():
@@ -130,6 +145,25 @@ def test_extraction_prompts_require_full_clause_value_and_short_quote():
     assert all("不要总结、改写或只返回字段值" in prompt for prompt in prompts)
     assert all("省略号" in prompt for prompt in prompts)
     assert all("不要把完整条款全文放入 evidence" in prompt for prompt in prompts)
+
+
+def test_extraction_prompts_allow_key_info_value_return_mode():
+    field = FieldSpec(
+        name="field_001",
+        description="合同金额",
+        type="string",
+        required=True,
+        value_return_mode="key_info",
+    )
+    prompts = [
+        _build_extraction_prompt(field, "[]"),
+        _build_long_context_extraction_prompt(field, "[]"),
+    ]
+
+    assert all("value_return_mode: key_info" in prompt for prompt in prompts)
+    assert all("value 必须只返回该字段对应的关键信息" in prompt for prompt in prompts)
+    assert all("完整合同条款原文" not in prompt for prompt in prompts)
+    assert all("不要总结、改写或只返回字段值" not in prompt for prompt in prompts)
 
 
 def test_tree_locator_prompt_uses_locations_with_page_limit():

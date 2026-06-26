@@ -425,6 +425,74 @@ def test_extract_dynamic_schema_injects_evidence_and_reformats_output(monkeypatc
     assert payload["extraction_result"]["amount"]["evidence_chain"][0]["role"] == "reference_source"
 
 
+def test_extract_dynamic_schema_evidence_key_info_mode_avoids_full_clause_instruction(monkeypatch, tmp_path):
+    output_dir = tmp_path / "output"
+    workspace_dir = tmp_path / "workspace"
+    captured = {}
+    json_schema = {
+        "type": "object",
+        "properties": {
+            "amount": {
+                "type": "string",
+                "description": "合同总价",
+                "value_return_mode": "key_info",
+            }
+        },
+    }
+
+    class DummyClient:
+        def __init__(self, workspace):
+            self.workspace = workspace
+
+        def get_tree_id(self, doc_id):
+            return "tree-demo"
+
+        def get_document_structure(self, doc_id):
+            return "[]"
+
+    def fake_extract(
+        client,
+        doc_id,
+        input_schema,
+        max_concurrency=8,
+        progress_callback=None,
+        include_retrieval_metadata=False,
+        retrieval_logger=None,
+        long_context_mode=False,
+    ):
+        captured["extract_schema"] = input_schema
+        return {
+            "amount": {
+                "status": "found",
+                "value": "500万元",
+                "evidence": "合同总价暂定为人民币500万元。",
+                "pages": [4],
+                "confidence": "High",
+                "reason": None,
+            }
+        }
+
+    monkeypatch.setattr(service, "PageIndexClient", DummyClient)
+    monkeypatch.setattr(service, "extract_contract_fields", fake_extract)
+
+    result = service.extract_dynamic_schema(
+        doc_id="doc-demo",
+        schema=json_schema,
+        output_dir=str(output_dir),
+        workspace_dir=str(workspace_dir),
+        require_evidence=True,
+    )
+
+    payload = json.loads(Path(result["output_path"]).read_text(encoding="utf-8"))
+    field = captured["extract_schema"]["fields"][0]
+
+    assert field["value_return_mode"] == "key_info"
+    assert "value 只返回该字段对应的关键信息" in field["instruction"]
+    assert "value 必须返回命中字段所在的完整合同条款原文" not in field["instruction"]
+    assert payload["extraction_result"]["amount"]["value"] == "500万元"
+    assert "value 只返回该字段对应的关键信息" in payload["extraction_result"]["amount"]["instruction"]
+
+
 def test_extract_dynamic_schema_evidence_result_uses_config_instruction_for_json_schema(monkeypatch, tmp_path):
     output_dir = tmp_path / "output"
     workspace_dir = tmp_path / "workspace"

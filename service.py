@@ -13,6 +13,8 @@ from pageindex.utils import convert_word_to_pdf
 PDF_FILE_SUFFIX = ".pdf"
 WORD_FILE_SUFFIXES = {".doc", ".docx"}
 SUPPORTED_DOCUMENT_SUFFIXES = WORD_FILE_SUFFIXES | {PDF_FILE_SUFFIX}
+VALUE_RETURN_MODE_FULL_CLAUSE = "full_clause"
+VALUE_RETURN_MODE_KEY_INFO = "key_info"
 
 
 def _schema_field_names(schema: dict[str, Any] | list[dict[str, Any]]) -> set[str]:
@@ -56,6 +58,7 @@ def _normalize_to_extraction_schema(schema: dict[str, Any] | list[dict[str, Any]
         description = str(property_schema.get("description", "")).strip() or f"提取字段“{name}”的值"
         field_type = property_schema.get("type", "string")
         instruction = str(property_schema.get("instruction", "") or "").strip()
+        value_return_mode = str(property_schema.get("value_return_mode", "") or "").strip()
 
         # evidence 注入后的字段会被包装成 object，这里退回到 value 子字段的定义，
         # 以便继续适配当前 field-based 的抽取引擎。
@@ -65,12 +68,19 @@ def _normalize_to_extraction_schema(schema: dict[str, Any] | list[dict[str, Any]
                 description = str(value_schema.get("description", "")).strip() or description
                 field_type = value_schema.get("type", "string")
                 instruction = instruction or str(value_schema.get("instruction", "") or "").strip()
+                value_return_mode = value_return_mode or str(value_schema.get("value_return_mode", "") or "").strip()
             evidence_instruction = "请基于原文同时给出 value、page_number、section_title、original_quote。"
-            clause_value_instruction = (
-                "其中 value 必须返回命中字段所在的完整合同条款原文；original_quote 只返回核心原文片段，"
-                "可使用省略号压缩上下文。"
-            )
-            instruction = "\n".join(filter(None, (instruction, evidence_instruction, clause_value_instruction)))
+            if value_return_mode == VALUE_RETURN_MODE_KEY_INFO:
+                value_instruction = (
+                    "其中 value 只返回该字段对应的关键信息；original_quote 只返回核心原文片段，"
+                    "可使用省略号压缩上下文。"
+                )
+            else:
+                value_instruction = (
+                    "其中 value 必须返回命中字段所在的完整合同条款原文；original_quote 只返回核心原文片段，"
+                    "可使用省略号压缩上下文。"
+                )
+            instruction = "\n".join(filter(None, (instruction, evidence_instruction, value_instruction)))
 
         fields.append(
             {
@@ -79,6 +89,7 @@ def _normalize_to_extraction_schema(schema: dict[str, Any] | list[dict[str, Any]
                 "type": str(field_type or "string"),
                 "required": name in required_fields,
                 "instruction": instruction,
+                "value_return_mode": value_return_mode or VALUE_RETURN_MODE_FULL_CLAUSE,
             }
         )
     return {"fields": fields}
@@ -139,6 +150,7 @@ def _inject_evidence_to_schema(original_schema: dict[str, Any]) -> dict[str, Any
         value_type = field_schema.get("type", "string")
         value_description = str(field_schema.get("description", "")).strip() or f"字段“{field_name}”的值"
         instruction = str(field_schema.get("instruction", "") or "").strip()
+        value_return_mode = str(field_schema.get("value_return_mode", "") or VALUE_RETURN_MODE_FULL_CLAUSE).strip()
         resolved_instruction = _resolve_field_instruction(
             str(field_name),
             value_description,
@@ -151,10 +163,16 @@ def _inject_evidence_to_schema(original_schema: dict[str, Any]) -> dict[str, Any
             "type": "object",
             "description": value_description,
             "instruction": resolved_instruction,
+            "value_return_mode": value_return_mode,
             "properties": {
                 "value": {
                     "type": value_type,
-                    "description": f"{value_description}。返回完整合同条款原文，不要总结或只返回字段值。",
+                    "description": (
+                        f"{value_description}。返回关键信息。"
+                        if value_return_mode == VALUE_RETURN_MODE_KEY_INFO
+                        else f"{value_description}。返回完整合同条款原文，不要总结或只返回字段值。"
+                    ),
+                    "value_return_mode": value_return_mode,
                 },
                 "page_number": {
                     "type": "array",
