@@ -11,8 +11,8 @@ def test_xt_full_schema_is_normalizable_and_complete():
     schema = json.loads(FULL_SCHEMA_PATH.read_text(encoding="utf-8"))
     fields = normalize_schema(schema)
 
-    assert len(fields) == 49
-    assert len({field.name for field in fields}) == 49
+    assert len(fields) == 50
+    assert len({field.name for field in fields}) == 50
 
 
 def test_xt_full_schema_distinguishes_duplicate_chinese_labels():
@@ -31,8 +31,21 @@ def test_xt_full_schema_populates_instruction_from_remarks():
 
     assert field_map["advance_payment"]["instruction"] == "确认付款比例，付款条件"
     assert field_map["delivery_location"]["instruction"] == "工厂EXW交货？现场交货？\n码头、道路情况"
-    assert field_map["insurer"]["instruction"] == "是否有指定"
+    assert field_map["insurer"]["instruction"] == "重点判断是否明确指定，并提取被指定机构的完整名称。"
     assert field_map["performance_penalty"]["instruction"] == "出力、热耗、排放、噪音、震动等"
+
+
+def test_xt_full_schema_contains_updated_contract_fields():
+    schema = json.loads(FULL_SCHEMA_PATH.read_text(encoding="utf-8"))
+    field_map = {field["name"]: field for field in schema["fields"]}
+
+    assert field_map["power_plant_address"]["label_cn"] == "电厂地址"
+    assert field_map["power_plant_address"]["focus_cn"] == "合同基础信息"
+    assert "签字页" in field_map["power_plant_address"]["description"]
+    assert "技术培训费" in field_map["training_payment"]["description"]
+    assert "支付方式" in field_map["training_payment"]["description"]
+    assert "完整名称" in field_map["insurer"]["description"]
+    assert "开立或出具机构" in field_map["advance_payment_bond"]["description"]
 
 
 def test_xt_full_schema_marks_price_summary_fields_as_key_info():
@@ -59,6 +72,7 @@ def test_xt_full_schema_key_info_descriptions_do_not_repeat_return_mode_prompt()
         "project_name",
         "unit_configuration",
         "customer_name",
+        "power_plant_address",
         "contract_total_price",
         "equipment_total_price",
         "pricing_technical_service_fee",

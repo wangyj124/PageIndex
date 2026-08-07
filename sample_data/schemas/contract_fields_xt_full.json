@@ -31,6 +31,16 @@
       "instruction": ""
     },
     {
+      "name": "power_plant_address",
+      "label_cn": "电厂地址",
+      "focus_cn": "合同基础信息",
+      "description": "合同中的电厂地址，通常为买方地址，常出现在合同签字页、签署栏或其他需要签字盖章的位置。",
+      "type": "string",
+      "required": false,
+      "value_return_mode": "key_info",
+      "instruction": "优先提取完整、明确的地址原文。"
+    },
+    {
       "name": "contract_total_price",
       "label_cn": "合同总价",
       "focus_cn": "合同价格",
@@ -166,7 +176,7 @@
       "name": "training_payment",
       "label_cn": "培训费",
       "focus_cn": "付款方式",
-      "description": "提取‘付款方式-培训费’相关合同约定/金额/条件",
+      "description": "提取合同中关于培训费或技术培训费的金额、支付安排（包括支付条件、支付节点及支付方式）以及培训内容的完整原文条款。",
       "type": "string",
       "required": false,
       "instruction": ""
@@ -355,10 +365,10 @@
       "name": "insurer",
       "label_cn": "保险公司",
       "focus_cn": "保险",
-      "description": "提取‘保险-保险公司’相关合同约定/金额/条件",
+      "description": "识别合同中是否明确指定保险公司或保险机构；如有，提取被指定机构的完整名称及相关原文信息。",
       "type": "string",
       "required": false,
-      "instruction": "是否有指定"
+      "instruction": "重点判断是否明确指定，并提取被指定机构的完整名称。"
     },
     {
       "name": "performance_bond",
@@ -373,10 +383,10 @@
       "name": "advance_payment_bond",
       "label_cn": "预付款保函",
       "focus_cn": "保函",
-      "description": "提取‘保函-预付款保函’相关合同约定/金额/条件",
+      "description": "识别合同中是否明确指定预付款保函的开立或出具机构（如银行、保险公司等）；如有，提取被指定机构的完整名称及相关原文信息。",
       "type": "string",
       "required": false,
-      "instruction": ""
+      "instruction": "重点判断是否明确指定开立或出具机构，并提取该机构的完整名称。"
     },
     {
       "name": "service_scope",
