@@ -670,11 +670,13 @@ Linux 部署时，`word_document_converted` 对应的底层转换后端为远程
 当 `require_evidence=false` 时，`extraction_result` 中每个字段通常包含：
 
 - `status`
-- `value`：命中字段所在的完整合同条款原文；如果多个条款共同支持结果，按条款逐条返回
+- `value`：由字段的 `value_return_mode` 决定；`full_clause` 返回命中字段所在的完整合同条款原文，`key_info` 基于原文总结得到字段答案
 - `evidence`：支撑判断的核心原文片段，可使用省略号压缩上下文
 - `pages`
 - `confidence`
 - `reason`
+
+完整合同拆解 Schema 与“合同拆解字段（项目维度）”表的 54 个字段一一对应。其中表内标记为“原文”的字段使用 `full_clause`，继续强制返回完整条款原文；标记为“总结”的字段使用 `key_info`，基于原文归纳后返回精炼答案，未找到时 `value` 固定返回“未找到”。
 
 当 `require_evidence=true` 时，`extraction_result` 中每个字段会被整理为更适合前端或审阅链路消费的结构，通常包含：
 

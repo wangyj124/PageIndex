@@ -262,7 +262,7 @@ curl -X POST "http://10.67.75.27:8000/api/v1/upload_and_build_by_url" ^
 当 `require_evidence=false` 时，抽取结果更接近内部字段抽取结构，通常包含：
 
 - `status`
-- `value`：命中字段所在的完整合同条款原文；如果多个条款共同支持结果，按条款逐条返回
+- `value`：由字段的 `value_return_mode` 决定；`full_clause` 返回命中字段所在的完整合同条款原文，`key_info` 基于原文总结得到字段答案；`key_info` 未找到时固定返回“未找到”
 - `evidence`：支撑判断的核心原文片段，可使用省略号压缩上下文
 - `pages`
 - `confidence`

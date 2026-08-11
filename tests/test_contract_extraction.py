@@ -161,7 +161,9 @@ def test_extraction_prompts_allow_key_info_value_return_mode():
     ]
 
     assert all("value_return_mode: key_info" in prompt for prompt in prompts)
-    assert all("value 必须只返回该字段对应的关键信息" in prompt for prompt in prompts)
+    assert all("value 必须基于合同原文总结得到该字段答案" in prompt for prompt in prompts)
+    assert all("只输出总结后的字段答案" in prompt for prompt in prompts)
+    assert all('如果 status 为 "not_found"' in prompt and 'value 设为 "未找到"' in prompt for prompt in prompts)
     assert all("完整合同条款原文" not in prompt for prompt in prompts)
     assert all("不要总结、改写或只返回字段值" not in prompt for prompt in prompts)
 
@@ -572,6 +574,37 @@ def test_query_cache_hit_is_normalized_to_current_limits_and_key_includes_limits
         "generation_source": "cache_hit",
     }
     assert _query_cache_key(client, field) != _query_cache_key(less_restricted_client, field)
+
+
+def test_key_info_not_found_returns_explicit_marker(monkeypatch):
+    responses = iter(
+        [
+            '{"pages":[4],"reason":"签署信息可能在尾页"}',
+            '{"status":"not_found","value":"","evidence":"","pages":[4],"confidence":"Low","reason":"未找到明确日期"}',
+        ]
+    )
+
+    async def fake_llm_acompletion(model, prompt):
+        return next(responses)
+
+    monkeypatch.setattr("pageindex.contract_extraction.llm_acompletion", fake_llm_acompletion)
+
+    result = extract_contract_fields(
+        StubClient(),
+        "doc-2",
+        [
+            {
+                "name": "signing_date",
+                "description": "合同签订日期",
+                "type": "date",
+                "value_return_mode": "key_info",
+            }
+        ],
+        max_concurrency=1,
+    )
+
+    assert result["signing_date"]["status"] == "not_found"
+    assert result["signing_date"]["value"] == "未找到"
 
 
 def test_enhanced_extraction_preserves_locator_page_priority(monkeypatch):

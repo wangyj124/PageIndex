@@ -8,27 +8,57 @@
       "type": "string",
       "required": false,
       "value_return_mode": "key_info",
-      "instruction": ""
+      "instruction": "优先从封面合同名称、合同协议书和附件履约保函等位置识别项目名称。合同名称通常由“项目名称+合同类型或采购内容”组成，应去除“机岛设备采购合同”“设备采购合同”等合同类型后缀，仅保留项目主体名称。例如“滨海新区2×400MW燃气热电联产项目机岛设备采购合同”应总结为“滨海新区2×400MW燃气热电联产项目”。示例仅用于说明拆分规则，不得作为答案；必须以当前合同原文为准。"
+    },
+    {
+      "name": "seller_contract_number",
+      "label_cn": "卖方合同号",
+      "focus_cn": "合同基础信息",
+      "description": "合同中由卖方编制或标注的合同编号，常见于合同首页、页眉、签署页或合同编号栏。",
+      "type": "string",
+      "required": false,
+      "value_return_mode": "key_info",
+      "instruction": "优先从合同封面、合同协议书、签署页或明确标注“卖方合同号”的编号栏提取。结果按字符串返回，保留原文中的字母、数字、斜杠、连字符等编号字符；不要把买方合同号、项目编号或招标编号误作卖方合同号。"
+    },
+    {
+      "name": "buyer_contract_number",
+      "label_cn": "买方合同号",
+      "focus_cn": "合同基础信息",
+      "description": "合同中由买方编制或标注的合同编号，也可能表述为买方合同号或对方合同号。",
+      "type": "string",
+      "required": false,
+      "value_return_mode": "key_info",
+      "instruction": "优先从合同封面、合同协议书、签署页或明确标注“买方合同号”的编号栏提取。结果按字符串返回，保留原文中的字母、数字、斜杠、连字符等编号字符；不要把卖方合同号、项目编号或招标编号误作买方合同号。"
     },
     {
       "name": "unit_configuration",
-      "label_cn": "机组配置",
+      "label_cn": "机组数",
       "focus_cn": "合同基础信息",
-      "description": "为合同涉及的机组设备，一般出现在合同设备中。",
+      "description": "合同涉及的机组数量，应结合设备清单、合同范围或项目名称等原文归纳得到明确数量。",
       "type": "string",
       "required": false,
       "value_return_mode": "key_info",
-      "instruction": ""
+      "instruction": "优先查找商务附件中的交货进度、设备清单、合同设备范围和机组介绍，判断合同包含的机组台数；合同名称中的“数字×容量等级”可作为线索，但应尽量与正文或附件交叉验证。例如“滨海新区3×400MW燃气热电联产项目机岛设备采购合同”通常表示3台400MW级机组。示例仅用于说明判断方式，不得作为答案；必须以当前合同原文为准。"
     },
     {
       "name": "customer_name",
-      "label_cn": "客户名称",
+      "label_cn": "合同甲方",
       "focus_cn": "合同基础信息",
-      "description": "即甲方或买方名称。",
+      "description": "合同甲方名称，通常也是买方名称。",
       "type": "string",
       "required": false,
       "value_return_mode": "key_info",
-      "instruction": ""
+      "instruction": "合同甲方通常指合同买方。优先从合同协议书、合同签字页及买卖双方信息栏提取甲方完整名称；必须区分甲方/买方与乙方/卖方，不要返回卖方名称。"
+    },
+    {
+      "name": "group_affiliation",
+      "label_cn": "所属集团",
+      "focus_cn": "合同基础信息",
+      "description": "合同甲方、电厂或项目所属的集团公司名称；仅在合同原文明示时返回。",
+      "type": "string",
+      "required": false,
+      "value_return_mode": "key_info",
+      "instruction": "识别合同买方、电厂或项目明确所属的集团公司。优先查找合同协议书、主体介绍和双方信息；买方名称中直接包含集团名称时可据此总结。仅在合同原文明示集团全称或明确隶属关系时返回，不要依据外部常识猜测。"
     },
     {
       "name": "power_plant_address",
@@ -41,6 +71,26 @@
       "instruction": "优先提取完整、明确的地址原文。"
     },
     {
+      "name": "contract_signing_date",
+      "label_cn": "合同签订日期",
+      "focus_cn": "合同基础信息",
+      "description": "合同双方正式签署合同的日期，优先从签署页、落款或合同基本信息中归纳。",
+      "type": "date",
+      "required": false,
+      "value_return_mode": "key_info",
+      "instruction": "优先从合同签字页、双方落款和合同协议书中提取明确的合同签订日期。不要把文件版本日期、打印日期、招标日期或其他业务日期误作合同签订日期；如双方签署日期不同，依据合同原文保留能够代表合同正式签订的日期。"
+    },
+    {
+      "name": "contract_effective_date",
+      "label_cn": "合同生效日期",
+      "focus_cn": "合同基础信息",
+      "description": "合同明确约定或记载的生效日期；不要把一般生效条件误当作具体日期。",
+      "type": "date",
+      "required": false,
+      "value_return_mode": "key_info",
+      "instruction": "优先从合同协议书和生效条款中提取明确写出的合同生效日期。必须区分具体日期与“签字盖章后生效”等生效条件；若合同只约定生效条件而没有明确日期，则判定为未找到。"
+    },
+    {
       "name": "contract_total_price",
       "label_cn": "合同总价",
       "focus_cn": "合同价格",
@@ -48,7 +98,7 @@
       "type": "string",
       "required": false,
       "value_return_mode": "key_info",
-      "instruction": ""
+      "instruction": "优先从合同价格章节、合同协议书和合同价格表附件中提取合同总价。应识别币种、含税或不含税口径，并与设备费、技术服务费、运输保险费等分项价格区分；返回合同明确列示的总价答案，不要自行补全被遮盖或缺失的金额。"
     },
     {
       "name": "equipment_total_price",
@@ -58,7 +108,7 @@
       "type": "string",
       "required": false,
       "value_return_mode": "key_info",
-      "instruction": ""
+      "instruction": "优先从合同价格章节和合同价格表附件中提取合同设备总价。设备总价仅指合同设备价格，应与合同总价、技术服务费、培训费、运输费和保险费等其他费用区分；保留原文中的币种及含税或不含税口径。"
     },
     {
       "name": "pricing_technical_service_fee",
@@ -78,17 +128,7 @@
       "type": "string",
       "required": false,
       "value_return_mode": "key_info",
-      "instruction": ""
-    },
-    {
-      "name": "provisional_amount",
-      "label_cn": "暂定金额",
-      "focus_cn": "合同价格",
-      "description": "常在合同价格及价格相关附件中提及。",
-      "type": "string",
-      "required": false,
-      "value_return_mode": "key_info",
-      "instruction": ""
+      "instruction": "优先从合同价格章节和合同价格表附件中识别国外技术培训费、设计联络会费或买方出国人员相关费用。value 只能返回合同原文明示的具体价格，统一输出为“数字+万元”，例如“128.50万元”；不要返回费用名称、币种说明、条款解释或计算过程。若金额为空、被遮盖、显示为横线或仅说明费用项目而没有具体金额，必须返回 status=not_found、value=未找到。禁止根据人数、单价、费率或其他字段推算金额。"
     },
     {
       "name": "misc_freight_and_insurance_fee",
@@ -98,7 +138,7 @@
       "type": "string",
       "required": false,
       "value_return_mode": "key_info",
-      "instruction": ""
+      "instruction": "优先从合同价格章节和合同价格表附件中提取杂运费（含保险费）或运保费。value 只能返回合同原文明示的具体合计价格，统一输出为“数字+万元”，例如“86.25万元”；不要返回运保费定义、费用构成、保险比例、条款解释或计算过程。若金额为空、被遮盖、显示为横线，或原文只有运输费/保险费定义及比例而没有明确合计金额，必须返回 status=not_found、value=未找到。禁止根据设备总价、保险比例或分项信息自行推算。"
     },
     {
       "name": "advance_payment",

@@ -374,8 +374,8 @@ def _build_locator_prompt(field, structure_digest, location_limit=3, pages_per_l
 def _value_return_rule_lines(field):
     if field.value_return_mode == VALUE_RETURN_MODE_KEY_INFO:
         return [
-            "  - value 必须只返回该字段对应的关键信息，例如项目名称、客户名称、机组配置、金额或费用项；不要返回完整合同条款全文。",
-            "  - 不要总结证据链，不要输出解释性文字，只输出字段本身的精炼结果。",
+            "  - value 必须基于合同原文总结得到该字段答案，例如项目名称、合同甲方、机组数、金额或费用项；不要返回完整合同条款全文。",
+            "  - 只输出总结后的字段答案，不要输出证据链或解释性文字。",
         ]
     return [
         "  - value 必须是命中字段所在的完整合同条款原文，不要总结、改写或只返回字段值。",
@@ -393,9 +393,22 @@ def _example_value(field):
     return "第X条 完整合同条款原文……"
 
 
+def _not_found_value(field):
+    return "未找到" if field.value_return_mode == VALUE_RETURN_MODE_KEY_INFO else ""
+
+
+def _apply_value_return_mode(field, result):
+    if result.get("status") != ExtractionStatus.NOT_FOUND.value:
+        return result
+    normalized = dict(result)
+    normalized["value"] = _not_found_value(field)
+    return normalized
+
+
 def _build_extraction_prompt(field, extraction_context_json):
     value_return_rules = _value_return_rules(field)
     example_value = _example_value(field)
+    not_found_value = _not_found_value(field)
     return f"""
 请从提供的页面文本中准确抽取一个合同字段。
 
@@ -424,9 +437,13 @@ def _build_extraction_prompt(field, extraction_context_json):
     - High：文本中明确写出了该条款内容，且 evidence 能直接支持结论
     - Medium：该值需要结合附近上下文或轻度推断得到
     - Low：证据间接、含糊，或支持力度较弱
-- 如果 status 为 "not_found" 或 "error"：
-  - value 设为 ""
+- 如果 status 为 "not_found"：
+  - value 设为 "{not_found_value}"
   - evidence 设为 ""
+  - confidence 设为 "Low"
+  - 必须提供非空的 reason
+- 如果 status 为 "error"：
+  - value 和 evidence 设为 ""
   - confidence 设为 "Low"
   - 必须提供非空的 reason
 - 如果 status 为 "reference_found"：
@@ -450,6 +467,7 @@ def _build_extraction_prompt(field, extraction_context_json):
 def _build_long_context_extraction_prompt(field, pages_json):
     value_return_rules = _value_return_rules(field)
     example_value = _example_value(field)
+    not_found_value = _not_found_value(field)
     return f"""
 请从完整文档的分页原文中准确抽取一个合同字段。
 
@@ -471,7 +489,8 @@ def _build_long_context_extraction_prompt(field, pages_json):
 {value_return_rules}
 - evidence 必须是支撑判断的核心原文片段，可使用省略号压缩上下文，例如“合同总价……人民币500万元……”，不要把完整条款全文放入 evidence。
 - pages 必须是支撑条款所在的物理页码数组。
-- 如果 status 为 "not_found" 或 "error"，value 和 evidence 设为 ""，confidence 设为 "Low"，并提供非空 reason。
+- 如果 status 为 "not_found"，value 设为 "{not_found_value}"，evidence 设为 ""，confidence 设为 "Low"，并提供非空 reason。
+- 如果 status 为 "error"，value 和 evidence 设为 ""，confidence 设为 "Low"，并提供非空 reason。
 - 不要返回未出现在完整文档分页原文中的页码。
 
 返回 JSON，格式如下：
@@ -1793,6 +1812,7 @@ async def _extract_contract_fields_async(
                 retries=retries,
                 timeout_seconds=timeout_seconds,
             )
+        result = (result[0], _apply_value_return_mode(field, result[1]))
         if not include_retrieval_metadata:
             result = (
                 result[0],

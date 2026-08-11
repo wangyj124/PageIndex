@@ -487,10 +487,10 @@ def test_extract_dynamic_schema_evidence_key_info_mode_avoids_full_clause_instru
     field = captured["extract_schema"]["fields"][0]
 
     assert field["value_return_mode"] == "key_info"
-    assert "value 只返回该字段对应的关键信息" in field["instruction"]
+    assert "value 必须基于原文总结得到该字段答案" in field["instruction"]
     assert "value 必须返回命中字段所在的完整合同条款原文" not in field["instruction"]
     assert payload["extraction_result"]["amount"]["value"] == "500万元"
-    assert "value 只返回该字段对应的关键信息" in payload["extraction_result"]["amount"]["instruction"]
+    assert "value 必须基于原文总结得到该字段答案" in payload["extraction_result"]["amount"]["instruction"]
 
 
 def test_extract_dynamic_schema_evidence_result_uses_config_instruction_for_json_schema(monkeypatch, tmp_path):

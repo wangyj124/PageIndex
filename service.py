@@ -72,7 +72,7 @@ def _normalize_to_extraction_schema(schema: dict[str, Any] | list[dict[str, Any]
             evidence_instruction = "请基于原文同时给出 value、page_number、section_title、original_quote。"
             if value_return_mode == VALUE_RETURN_MODE_KEY_INFO:
                 value_instruction = (
-                    "其中 value 只返回该字段对应的关键信息；original_quote 只返回核心原文片段，"
+                    "其中 value 必须基于原文总结得到该字段答案，不返回完整合同条款；original_quote 只返回核心原文片段，"
                     "可使用省略号压缩上下文。"
                 )
             else:
@@ -168,7 +168,7 @@ def _inject_evidence_to_schema(original_schema: dict[str, Any]) -> dict[str, Any
                 "value": {
                     "type": value_type,
                     "description": (
-                        f"{value_description}。返回关键信息。"
+                        f"{value_description}。基于原文总结得到字段答案，不要返回完整合同条款全文。"
                         if value_return_mode == VALUE_RETURN_MODE_KEY_INFO
                         else f"{value_description}。返回完整合同条款原文，不要总结或只返回字段值。"
                     ),
