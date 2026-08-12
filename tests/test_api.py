@@ -498,7 +498,15 @@ def test_openapi_uses_realistic_swagger_examples():
 
     extraction_request_example = schema["components"]["schemas"]["ExtractionRequest"]["example"]
     assert extraction_request_example["doc_id"] == "doc_1079388f5212c5d90f705bac4a6ad9612ff5d6cfa284802084d2ddb7d8544fab"
-    assert extraction_request_example["schema_def"]["properties"]["party_a"]["description"] == "甲方"
+    request_properties = extraction_request_example["schema_def"]["properties"]
+    assert request_properties["party_a"]["description"] == "甲方"
+    assert request_properties["party_a"]["value_return_mode"] == "key_info"
+    assert request_properties["party_b"]["value_return_mode"] == "key_info"
+    schema_def_description = schema["components"]["schemas"]["ExtractionRequest"]["properties"]["schema_def"][
+        "description"
+    ]
+    assert "key_info" in schema_def_description
+    assert "full_clause" in schema_def_description
     assert extraction_request_example["require_evidence"] is True
     assert extraction_request_example["long_context_mode"] is True
 

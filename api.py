@@ -56,10 +56,12 @@ EXTRACTION_REQUEST_EXAMPLE = {
             "party_a": {
                 "type": "string",
                 "description": "甲方",
+                "value_return_mode": "key_info",
             },
             "party_b": {
                 "type": "string",
                 "description": "乙方",
+                "value_return_mode": "key_info",
             },
         },
     },
@@ -179,7 +181,13 @@ class ExtractionRequest(BaseModel):
     model_config = ConfigDict(json_schema_extra={"example": EXTRACTION_REQUEST_EXAMPLE})
 
     doc_id: str = Field(..., description="已完成建树的文档 ID")
-    schema_def: dict[str, Any] = Field(..., description="动态抽取 schema 定义")
+    schema_def: dict[str, Any] = Field(
+        ...,
+        description=(
+            "动态抽取 schema 定义。建议在 properties 的每个字段中显式设置 value_return_mode："
+            "key_info 表示 value 返回基于原文总结的字段答案；full_clause 表示 value 返回命中的完整合同条款原文。"
+        ),
+    )
     require_evidence: bool = Field(default=False, description="是否启用带证据溯源的结果结构")
     long_context_mode: bool = Field(default=False, description="是否使用独立分页原文执行长上下文抽取")
 
